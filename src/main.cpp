@@ -9,6 +9,11 @@
 #include "soc/rtc_cntl_reg.h" // Disable brownout problems
 #include "driver/rtc_io.h"
 
+#include <ModbusRTUMaster.h>
+
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+
 #define DebugSerial Serial
 #define M1Serial Serial2
 
@@ -38,8 +43,8 @@ PubSubClient client(ppposClient);
 bool atMode = true;
 
 // MQTT Topic *************************************************************************************
-char *SUB_TOPIC = "type1sc/relay01/#";
-char *PUB_TOPIC = "type1sc/update/relay01";
+char *SUB_TOPIC = "type1sc/control/relay01/#"; // 구독 주제
+char *PUB_TOPIC = "type1sc/update/relay01";    // 발행 주제
 
 #define MQTT_SERVER "broker.hivemq.com"
 String buffer = "";
@@ -59,25 +64,28 @@ void extAntenna()
   }
 }
 
-// Relay settings (4 channels) ********************************************************************
-#define RELAY_NUM1 23
-#define RELAY_NUM2 13
-#define RELAY_NUM3 14
-#define RELAY_NUM4 15
+// RS485 setting **********************************************************************************
+#define SLAVE_ID 5
+#define START_ADDRESS 3
+#define QUANTITY 4
 
-// OFF: 1, HIGH
-#define RELAY_OFF 1
-#define RELAY_ON 0
-bool led_Relay1 = RELAY_OFF;
-bool led_Relay2 = RELAY_OFF;
-bool led_Relay3 = RELAY_OFF;
-bool led_Relay4 = RELAY_OFF;
+const uint8_t rxPin = 33; // RX-RO
+const uint8_t txPin = 32; // TX-DI
+const uint8_t dePin = 25; // DE+RE
+
+ModbusRTUMaster modbus(Serial1, dePin); // serial port, driver enable pin for rs-485 (optional)
+
+uint16_t writingRegisters[4] = {0, 0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 
 // mqtt 메시지 수신 콜백
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  byte *p = (byte *)malloc(length); // payload 크기만큼 메모리 동적할당
+  // 페이로드(메시지)는 반드시 숫자로만 구성된 문자열이어야 한다. -> 릴레이 딜레이타임으로 사용
+
+  byte *p = (byte *)malloc(length); // payload 길이만큼 바이트 단위 메모리 동적할당
   memcpy(p, payload, length);       // payload를 메모리에 복사
+
+  unsigned int delayTime = atoi((char *)p); // 릴레이 딜레이타임
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
@@ -116,7 +124,30 @@ void callback(char *topic, byte *payload, unsigned int length)
   //   }
   // }
 
-  // 릴레이 컨트롤 로직
+  // 릴레이 조작(컨트롤) 로직
+
+  // topic으로 한번 구분하고 (r1~)
+  if (strstr(topic, "r1")) // 릴레이 채널 1
+  {
+    writingRegisters[0] = 1; // 타입 1: on/off
+    writingRegisters[0] = 2; // 타입 2: 딜레이, 일정시간만 상태 유지
+    writingRegisters[2] = 0;
+    if (writingRegisters[0] == 1)
+      writingRegisters[3] = 0;
+    else if (writingRegisters[0] == 2)
+      writingRegisters[3] = delayTime;
+    modbus.writeMultipleHoldingRegisters(SLAVE_ID, START_ADDRESS, writingRegisters, QUANTITY);
+  }
+
+  if (strstr((char *)p, "0"))
+  {
+    // bla bla
+  }
+  else
+  {
+  }
+
+  // 릴레이 점멸 및 딜레이 구분
   if (strstr((char *)p, "1"))
   {
     if (strstr((char *)p, "on"))
@@ -228,17 +259,6 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  /* Relay pin Initialization */
-  pinMode(RELAY_NUM1, OUTPUT);
-  pinMode(RELAY_NUM2, OUTPUT);
-  pinMode(RELAY_NUM3, OUTPUT);
-  pinMode(RELAY_NUM4, OUTPUT);
-
-  // digitalWrite(RELAY_NUM1, RELAY_OFF);
-  // digitalWrite(RELAY_NUM2, RELAY_OFF);
-  // digitalWrite(RELAY_NUM3, RELAY_OFF);
-  // digitalWrite(RELAY_NUM4, RELAY_OFF);
-
   DebugSerial.println("TYPE1SC Module Start!!!");
 
   extAntenna();
@@ -323,6 +343,12 @@ void setup()
   {
     DebugSerial.println("Starting PPPOS... Failed");
   }
+
+  // RS485 Setup
+  modbus.setTimeout(12000);
+  modbus.begin(9600, SERIAL_8N1, rxPin, txPin); // 직렬 전송 설정 (baud, config, rxPin, txPin, invert)
+                                                // default config : SERIAL_8N1; { 데이터비트 8, 패리티 없음, 1 정지 비트}; E: 짝수 패리티, O: 홀수 패리티
+                                                // rxPin: 직렬 데이터 수신 핀; txPin: 직렬 데이터 전송 핀 (uint8_t)
 }
 
 void loop()
