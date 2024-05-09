@@ -47,8 +47,16 @@ char *SUB_TOPIC = "type1sc/control/relay01/#"; // 구독 주제
 char *PUB_TOPIC = "type1sc/update/relay01";    // 발행 주제
 
 #define MQTT_SERVER "broker.hivemq.com"
-String buffer = "";
+
+const int PUB_TOPIC_length = strlen(PUB_TOPIC); // pub_topic의 길이 계산
+
+// 이건 어디에 쓰려했지
 char *data = (char *)malloc(1024);
+
+String *Split(String sData, char cSeparator, int *scnt); // 문자열 파싱
+String *rStr = nullptr;                                  // 파싱된 문자열 저장변수
+bool isNumeric(String str);                              // 문자열이 숫자로만 구성되어있는지 판단
+void printBinary16(uint16_t num);                        // 16자리 이진수 바이너리 출력
 
 /* EXT_ANT_ON 0 : Use an internal antenna.
  * EXT_ANT_ON 1 : Use an external antenna.
@@ -75,17 +83,15 @@ const uint8_t dePin = 25; // DE+RE
 
 ModbusRTUMaster modbus(Serial1, dePin); // serial port, driver enable pin for rs-485 (optional)
 
-uint16_t writingRegisters[4] = {0, 0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
+uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 
 // mqtt 메시지 수신 콜백
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  // 페이로드(메시지)는 반드시 숫자로만 구성된 문자열이어야 한다. -> 릴레이 딜레이타임으로 사용
-
   byte *p = (byte *)malloc(length); // payload 길이만큼 바이트 단위 메모리 동적할당
   memcpy(p, payload, length);       // payload를 메모리에 복사
 
-  unsigned int delayTime = atoi((char *)p); // 릴레이 딜레이타임
+  // unsigned int delayTime = atoi((char *)p); // 릴레이 딜레이타임
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
@@ -98,6 +104,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   DebugSerial.println();
 
+  // 아직 사용 안하는 기능 240508
   // payload에 'on', 'off', 'dis'문자열이 포함되어 있는지 확인
   // 포함되어있다면 ext_led high/low; atmode
   // if (strstr((char *)p, "on"))
@@ -124,82 +131,148 @@ void callback(char *topic, byte *payload, unsigned int length)
   //   }
   // }
 
-  // 릴레이 조작(컨트롤) 로직
-
-  // topic으로 한번 구분하고 (r1~)
-  if (strstr(topic, "r1")) // 릴레이 채널 1
+  // 메시지 스플릿 - 페이로드 파싱
+  // p가 가리키는 값을 payloadBuffer에 복사
+  String payloadBuffer = "";
+  for (unsigned int i = 0; i < length; i++)
   {
-    writingRegisters[0] = 1; // 타입 1: on/off
-    writingRegisters[0] = 2; // 타입 2: 딜레이, 일정시간만 상태 유지
-    writingRegisters[2] = 0;
-    if (writingRegisters[0] == 1)
+    payloadBuffer += (char)p[i]; // payload 버퍼 - Split 파싱에 사용
+  }
+
+  DebugSerial.println(payloadBuffer);
+
+  int cnt = 0;
+  rStr = Split(payloadBuffer, '&', &cnt);
+
+  DebugSerial.println(rStr[0]); // on/off
+  DebugSerial.println(rStr[1]); // delayTime
+  DebugSerial.println(isNumeric(rStr[1]));
+
+  if (isNumeric(rStr[1]))
+  {
+    if (rStr[1].toInt() == 0) // 딜레이 시간값 0: 단순 on/off
+    {
+      writingRegisters[0] = 1; // 타입: 단순 on/off
       writingRegisters[3] = 0;
-    else if (writingRegisters[0] == 2)
-      writingRegisters[3] = delayTime;
-    modbus.writeMultipleHoldingRegisters(SLAVE_ID, START_ADDRESS, writingRegisters, QUANTITY);
+    }
+    else if (rStr[1].toInt() > 0)
+    {
+      writingRegisters[0] = 2;               // 타입: Write with Delay
+      writingRegisters[3] = rStr[1].toInt(); // 딜레이할 시간값 대입
+    }
+
+    // 릴레이 조작(컨트롤) 로직 ******************************************************************************************
+
+    // topic으로 한번 구분하고 (r1~)
+    if (strstr(topic, "/r1")) // 릴레이 채널 1 (인덱스 0)
+    {
+      if (strstr((char *)p, "on")) // 메시지에 'on' 포함 시
+      {
+        if (writingRegisters[0] == 1) // 단순 on/off
+        {
+          writingRegisters[2] = 0b0000000100000001;
+
+          DebugSerial.print("writingRegisters[2]: ");
+          DebugSerial.println(writingRegisters[2]);
+        }
+        else if (writingRegisters[0] == 2) // Write with Delay
+        {
+          // 이후 구현
+        }
+      }
+      if (strstr((char *)p, "off")) // 메시지에 'off' 포함 시
+      {
+        if (writingRegisters[0] == 1) // 단순 on/off
+        {
+          writingRegisters[2] = 0b0000000100000000;
+
+          DebugSerial.print("writingRegisters[2]: ");
+          DebugSerial.println(writingRegisters[2]);
+        }
+        else if (writingRegisters[0] == 2) // Write with Delay
+        {
+          // 이후 구현
+        }
+      }
+
+      modbus.writeMultipleHoldingRegisters(SLAVE_ID, START_ADDRESS, writingRegisters, QUANTITY);
+
+      DebugSerial.println("MODBUS Writing done.");
+
+      // while (true)
+      // {
+      //   if (modbus.writeMultipleHoldingRegisters(SLAVE_ID, START_ADDRESS, writingRegisters, QUANTITY)) // FuncCode : 0x10
+      //   {
+      //     DebugSerial.printf("[MODBUS] [slaveID]: %d\n", SLAVE_ID);
+      //     DebugSerial.printf("[MODBUS] [Write Type]: %d\n", writingRegisters[0]);
+      //     DebugSerial.print("[MODBUS] [Adv Write Relay]: ");
+      //     printBinary16(writingRegisters[2]);
+      //     DebugSerial.printf("[MODBUS] [Adv Write Time]: %d\n", writingRegisters[3]);
+
+      //     break;
+      //   }
+      //   else
+      //   {
+      //     Serial.println("[MODBUS] Cannot Read Holding Resisters...");
+      //     if (modbus.getTimeoutFlag())
+      //     {
+      //       Serial.println("TimeOut");
+      //     }
+      //     if (modbus.getExceptionResponse() > 0)
+      //     {
+      //       Serial.print("getExceptionResponse: ");
+      //       Serial.println(modbus.getExceptionResponse());
+      //     }
+      //     delay(5000);
+      //   }
+      // }
+
+      // 발행 주제 설정
+      char *suffix = "/r1";               // 추가할 문자열을 설정
+      int suffix_length = strlen(suffix); // 추가할 문자열(suffix)의 길이 계산
+
+      // 새로운 문자열을 저장할 메모리 할당
+      char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
+      strcpy(new_PUB_TOPIC, PUB_TOPIC);                                           // PUB_TOPIC의 내용을 새로운 문자열에 복사
+      strcat(new_PUB_TOPIC, suffix);                                              // suffix를 새로운 문자열에 추가
+
+      // topic: "type1sc/update/relay01" + "r-"
+      client.publish(new_PUB_TOPIC, p, length); // 릴레이
+
+      free(new_PUB_TOPIC);
+    }
+
+    if (strstr(topic, "/r2")) // 릴레이 채널 2 (인덱스 1)
+    {
+      // 메시지 스플릿해서 저장변수 [1]인덱스가 0이면 단순 on/off로 3번 레지스터 값 1 (타입: 단순 on/off)
+      // 그 외의 숫자값이면 3번레지스터 값 2 (타입: 딜레이 사용)
+    }
+    if (strstr(topic, "/r3")) // 릴레이 채널 3 (인덱스 2)
+    {
+    }
+    if (strstr(topic, "/r4")) // 릴레이 채널 4 (인덱스 3)
+    {
+    }
+    if (strstr(topic, "/r5")) // 릴레이 채널 5 (인덱스 4)
+    {
+    }
+    if (strstr(topic, "/r6")) // 릴레이 채널 6 (인덱스 5)
+    {
+    }
+    if (strstr(topic, "/r7")) // 릴레이 채널 7 (인덱스 6)
+    {
+    }
+    if (strstr(topic, "/r8")) // 릴레이 채널 8 (인덱스 7)
+    {
+    }
+  }
+  else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
+  {
+    DebugSerial.println("Payload arrived, But has invalid value: delayTime");
+    // 아무것도 하지 않음
   }
 
-  if (strstr((char *)p, "0"))
-  {
-    // bla bla
-  }
-  else
-  {
-  }
-
-  // 릴레이 점멸 및 딜레이 구분
-  if (strstr((char *)p, "1"))
-  {
-    if (strstr((char *)p, "on"))
-    {
-      digitalWrite(RELAY_NUM1, RELAY_ON);
-      client.publish(PUB_TOPIC, p, length);
-    }
-    else if (strstr((char *)p, "off"))
-    {
-      digitalWrite(RELAY_NUM1, RELAY_OFF);
-      client.publish(PUB_TOPIC, p, length);
-    }
-  }
-  else if (strstr((char *)p, "2"))
-  {
-    if (strstr((char *)p, "on"))
-    {
-      digitalWrite(RELAY_NUM2, RELAY_ON);
-      client.publish(PUB_TOPIC, p, length);
-    }
-    else if (strstr((char *)p, "off"))
-    {
-      digitalWrite(RELAY_NUM2, RELAY_OFF);
-      client.publish(PUB_TOPIC, p, length);
-    }
-  }
-  else if (strstr((char *)p, "3"))
-  {
-    if (strstr((char *)p, "on"))
-    {
-      digitalWrite(RELAY_NUM3, RELAY_ON);
-      client.publish(PUB_TOPIC, p, length);
-    }
-    else if (strstr((char *)p, "off"))
-    {
-      digitalWrite(RELAY_NUM3, RELAY_OFF);
-      client.publish(PUB_TOPIC, p, length);
-    }
-  }
-  else if (strstr((char *)p, "4"))
-  {
-    if (strstr((char *)p, "on"))
-    {
-      digitalWrite(RELAY_NUM4, RELAY_ON);
-      client.publish(PUB_TOPIC, p, length);
-    }
-    else if (strstr((char *)p, "off"))
-    {
-      digitalWrite(RELAY_NUM4, RELAY_OFF);
-      client.publish(PUB_TOPIC, p, length);
-    }
-  }
+  DebugSerial.println("free memory");
   free(p);
 }
 
@@ -251,6 +324,87 @@ void reconnect()
   }
 }
 
+// 문자열 분할 함수 Split
+String *Split(String sData, char cSeparator, int *scnt)
+{
+  // 최대 분할 가능한 문자열 개수
+  const int MAX_STRINGS = 15;
+
+  // 문자열 배열 동적 할당
+  static String charr[MAX_STRINGS];
+
+  // 분할된 문자열의 개수를 저장할 변수
+  int nCount = 0;
+
+  // 임시 저장용 문자열
+  String sTemp = "";
+
+  // 복사할 문자열
+  String sCopy = sData;
+
+  // 문자열을 구분자를 기준으로 분할하여 배열에 저장
+  while (true)
+  {
+    // 구분자를 찾음
+    int nGetIndex = sCopy.indexOf(cSeparator);
+
+    // 문자열을 찾지 못한 경우
+    if (-1 == nGetIndex)
+    {
+      // 남은 문자열을 배열에 저장하고 반복문 종료
+      charr[nCount++] = sCopy;
+      break;
+    }
+
+    // 구분자를 찾은 경우
+    // 구분자 이전까지의 문자열을 잘라서 배열에 저장
+    charr[nCount++] = sCopy.substring(0, nGetIndex);
+
+    // 다음 문자열을 탐색하기 위해 복사된 문자열을 잘라냄
+    sCopy = sCopy.substring(nGetIndex + 1);
+
+    // 배열이 가득 차면 반복문 종료
+    if (nCount >= MAX_STRINGS)
+    {
+      Serial.println("Message is too long... You have loss data.");
+      break;
+    }
+  }
+
+  // 분할된 문자열의 개수를 scnt 포인터를 통해 반환
+  *scnt = nCount;
+
+  // 분할된 문자열 배열 반환
+  return charr;
+}
+
+// 문자열이 숫자로만 구성되어있는지 확인
+bool isNumeric(String str)
+{
+  for (int i = 0; i < str.length(); i++)
+  {
+    if (!isdigit(str.charAt(i)))
+    {
+      return false; // 숫자가 아닌 문자가 발견되면 false 반환
+    }
+  }
+  return true; // 모든 문자가 숫자라면 true 반환
+}
+
+// 16자리 이진수 출력
+void printBinary16(uint16_t num)
+{
+  for (int i = 15; i >= 0; i--)
+  {
+    Serial.print(bitRead(num, i));
+    if (i % 4 == 0)
+    {
+      Serial.print(" "); // 매 4자리마다 공백 출력
+    }
+  }
+  Serial.println();
+}
+
 void setup()
 {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -258,6 +412,14 @@ void setup()
   // put your setup code here, to run once:
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
+
+  // RS485 Setup
+  modbus.setTimeout(12000);
+  DebugSerial.println(" [MODBUS] SetTimeout");
+  modbus.begin(9600, SERIAL_8N1, rxPin, txPin); // 직렬 전송 설정 (baud, config, rxPin, txPin, invert)
+                                                // default config : SERIAL_8N1; { 데이터비트 8, 패리티 없음, 1 정지 비트}; E: 짝수 패리티, O: 홀수 패리티
+                                                // rxPin: 직렬 데이터 수신 핀; txPin: 직렬 데이터 전송 핀 (uint8_t)
+  DebugSerial.println(" [MODBUS] Begin OK");
 
   DebugSerial.println("TYPE1SC Module Start!!!");
 
@@ -343,12 +505,6 @@ void setup()
   {
     DebugSerial.println("Starting PPPOS... Failed");
   }
-
-  // RS485 Setup
-  modbus.setTimeout(12000);
-  modbus.begin(9600, SERIAL_8N1, rxPin, txPin); // 직렬 전송 설정 (baud, config, rxPin, txPin, invert)
-                                                // default config : SERIAL_8N1; { 데이터비트 8, 패리티 없음, 1 정지 비트}; E: 짝수 패리티, O: 홀수 패리티
-                                                // rxPin: 직렬 데이터 수신 핀; txPin: 직렬 데이터 전송 핀 (uint8_t)
 }
 
 void loop()
