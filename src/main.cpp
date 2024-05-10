@@ -15,10 +15,11 @@
 #include <AsyncTCP.h>
 
 #define DebugSerial Serial
+HardwareSerial SerialPort(1); // use ESP32 UART1
 #define M1Serial Serial2
 
 #define SERIAL_BR 115200
-#define GSM_SERIAL 1
+#define GSM_SERIAL 2 // MODBUS Serial1과 충돌해 Serial2로 변경
 #define GSM_RX 16
 #define GSM_TX 17
 #define GSM_BR 115200
@@ -32,7 +33,6 @@
 // PPPOS, MQTT settings ***************************************************************************
 char *ppp_user = "daonTest01";
 char *ppp_pass = "daon7521";
-#define ReConnectID "catm1Client01"
 
 char *server = "example.com";
 String APN = "simplio.apn";
@@ -42,13 +42,29 @@ PPPOSClient ppposClient;
 PubSubClient client(ppposClient);
 bool atMode = true;
 
+// Set MQTT Device Name ***************************************************************************
+#define ReConnectID "relay01"
+#define DEVICE_NAME "/" + ReConnectID
+// ************************************************************************************************
+
+#define QOS 1
+
 // MQTT Topic *************************************************************************************
-char *SUB_TOPIC = "type1sc/control/relay01/#"; // 구독 주제
-char *PUB_TOPIC = "type1sc/update/relay01";    // 발행 주제
+// char *SUB_TOPIC = "type1sc/control/relay01/#"; // 구독 주제
+// char *PUB_TOPIC = "type1sc/update/relay01";    // 발행 주제
 
 #define MQTT_SERVER "broker.hivemq.com"
 
-const int PUB_TOPIC_length = strlen(PUB_TOPIC); // pub_topic의 길이 계산
+String SUB_TOPIC = "type1sc/control"; // 구독 주제: type1sc/control
+String PUB_TOPIC = "type1sc/update";  // 발행 주제: type1sc/update
+
+const int PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_NAME).c_str()); // pub_topic의 길이 계산
+
+String WILL_TOPIC = "type1sc/disconnect";
+String WILL_MESSAGE = "DISCONNECTED.";
+
+#define MULTI_LEVEL_WILDCARD "/#"
+#define SINGLE_LEVEL_WILDCARD "/+"
 
 // 이건 어디에 쓰려했지
 char *data = (char *)malloc(1024);
@@ -77,8 +93,8 @@ void extAntenna()
 #define START_ADDRESS 3
 #define QUANTITY 4
 
-const uint8_t rxPin = 33; // RX-RO
 const uint8_t txPin = 32; // TX-DI
+const uint8_t rxPin = 33; // RX-RO
 const uint8_t dePin = 25; // DE+RE
 
 ModbusRTUMaster modbus(Serial1, dePin); // serial port, driver enable pin for rs-485 (optional)
@@ -139,14 +155,14 @@ void callback(char *topic, byte *payload, unsigned int length)
     payloadBuffer += (char)p[i]; // payload 버퍼 - Split 파싱에 사용
   }
 
-  DebugSerial.println(payloadBuffer);
+  // DebugSerial.println(payloadBuffer);
 
   int cnt = 0;
   rStr = Split(payloadBuffer, '&', &cnt);
 
-  DebugSerial.println(rStr[0]); // on/off
-  DebugSerial.println(rStr[1]); // delayTime
-  DebugSerial.println(isNumeric(rStr[1]));
+  // DebugSerial.println(rStr[0]); // on/off
+  // DebugSerial.println(rStr[1]); // delayTime
+  // DebugSerial.println(isNumeric(rStr[1]));
 
   if (isNumeric(rStr[1]))
   {
@@ -172,8 +188,8 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           writingRegisters[2] = 0b0000000100000001;
 
-          DebugSerial.print("writingRegisters[2]: ");
-          DebugSerial.println(writingRegisters[2]);
+          // DebugSerial.print("writingRegisters[2]: ");
+          // DebugSerial.println(writingRegisters[2]);
         }
         else if (writingRegisters[0] == 2) // Write with Delay
         {
@@ -186,8 +202,8 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           writingRegisters[2] = 0b0000000100000000;
 
-          DebugSerial.print("writingRegisters[2]: ");
-          DebugSerial.println(writingRegisters[2]);
+          // DebugSerial.print("writingRegisters[2]: ");
+          // DebugSerial.println(writingRegisters[2]);
         }
         else if (writingRegisters[0] == 2) // Write with Delay
         {
@@ -233,11 +249,19 @@ void callback(char *topic, byte *payload, unsigned int length)
 
       // 새로운 문자열을 저장할 메모리 할당
       char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
-      strcpy(new_PUB_TOPIC, PUB_TOPIC);                                           // PUB_TOPIC의 내용을 새로운 문자열에 복사
+      strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_NAME).c_str());                   // PUB_TOPIC의 내용을 새로운 문자열에 복사
       strcat(new_PUB_TOPIC, suffix);                                              // suffix를 새로운 문자열에 추가
 
       // topic: "type1sc/update/relay01" + "r-"
-      client.publish(new_PUB_TOPIC, p, length); // 릴레이
+      client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
+
+      // DebugSerial.println(suffix);
+      // DebugSerial.println(suffix_length);
+      // DebugSerial.println(PUB_TOPIC + DEVICE_NAME);
+      // DebugSerial.println(PUB_TOPIC_length);
+
+      // DebugSerial.println(new_PUB_TOPIC);
+      // DebugSerial.println(payloadBuffer.c_str());
 
       free(new_PUB_TOPIC);
     }
@@ -305,13 +329,16 @@ void reconnect()
   {
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
-    if (client.connect(ReConnectID)) // ID 바꿔서 mqtt 서버 연결시도
+    // if (client.connect(ReConnectID)) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
+    if (client.connect(ReConnectID, (WILL_TOPIC + DEVICE_NAME).c_str(), QOS, 0, WILL_MESSAGE.c_str()))
     {
       DebugSerial.println("connected");
-      client.subscribe(SUB_TOPIC, 1);
+
+      client.subscribe((SUB_TOPIC + DEVICE_NAME + MULTI_LEVEL_WILDCARD).c_str(), QOS);
+
       // Once connected, publish an announcement...
-      client.publish(PUB_TOPIC, "MQTT Device Ready."); // 준비되었음을 알림(publish)
-      // ... and resubscribe
+      client.publish((PUB_TOPIC + DEVICE_NAME).c_str(), "MQTT Device Ready."); // 준비되었음을 알림(publish)
+                                                                               // ... and resubscribe
     }
     else // 실패 시 재연결 시도
     {
@@ -412,6 +439,9 @@ void setup()
   // put your setup code here, to run once:
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
+
+  // /* Serial1 Initialization */
+  // SerialPort.begin(115200, SERIAL_8N1, 33, 32); // RXD1 : 33, TXD1 : 32
 
   // RS485 Setup
   modbus.setTimeout(12000);
