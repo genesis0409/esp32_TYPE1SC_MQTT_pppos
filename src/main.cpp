@@ -9,7 +9,7 @@
 #include "soc/rtc_cntl_reg.h" // Disable brownout problems
 #include "driver/rtc_io.h"
 
-#include <ModbusRTUMaster.h>
+#include <ModbusMaster.h>
 
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -109,14 +109,34 @@ void extAntenna()
 
 const uint8_t txPin = 32; // TX-DI
 const uint8_t rxPin = 33; // RX-RO
-const uint8_t dePin = 25; // DE+RE
+const uint8_t dePin = 13; // DE
+const uint8_t rePin = 14; // RE
 
-ModbusRTUMaster modbus(Serial1, dePin); // serial port, driver enable pin for rs-485 (optional)
+// ModbusRTUMaster modbus(Serial1, dePin); // serial port, driver enable pin for rs-485 (optional)
+ModbusMaster modbus;
+uint8_t modbus_result;
 
 uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 uint16_t readingRegister[1] = {0};
 
 uint8_t index_relay; // r1~r8: 0~7
+
+void preTransmission();
+void postTransmission();
+
+void preTransmission()
+{
+  // 전송 방식
+  digitalWrite(dePin, HIGH);
+  digitalWrite(rePin, HIGH);
+}
+
+void postTransmission()
+{
+  // 수신 방식
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+}
 
 // mqtt 메시지 수신 콜백
 void callback(char *topic, byte *payload, unsigned int length)
@@ -257,15 +277,22 @@ void callback(char *topic, byte *payload, unsigned int length)
   else if (rStr[0] == "refresh")
   {
     // relay status
-    modbus.readHoldingRegisters(SLAVE_ID, READ_START_ADDRESS, readingRegister, READ_QUANTITY);
+    modbus_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY);
+    // modbus.readHoldingRegisters(SLAVE_ID, READ_START_ADDRESS, readingRegister, READ_QUANTITY);
 
-    DebugSerial.println("MODBUS Reading done.");
+    DebugSerial.print("modbus_result: ");
+    DebugSerial.println(modbus_result);
+
+    if (modbus_result == modbus.ku8MBSuccess)
+    {
+      readingRegister[0] = modbus.getResponseBuffer(0);
+      DebugSerial.println(modbus.getResponseBuffer(0));
+      DebugSerial.println("MODBUS Reading done.");
+    }
+    DebugSerial.print("readingRegister: ");
     DebugSerial.println(readingRegister[0]);
-    // for (int i = 7; i >= 0; i--)
-    // {
-    //   Serial.print(bitRead(readingRegister[0], i));
-    // }
-    // Serial.println();
+
+    printBinary8(writingRegisters[0]);
 
     // topic: "type1sc/update/relay01
     client.publish((PUB_TOPIC + DEVICE_NAME).c_str(), std::to_string(readingRegister[0]).c_str());
@@ -276,11 +303,13 @@ void callback(char *topic, byte *payload, unsigned int length)
     // 아무것도 하지 않음
   }
 
+  // 버퍼 초기화 및 메모리 해제
   payloadBuffer = "";
   rStr[0] = "";
   rStr[1] = "";
   free(p);
   DebugSerial.println("free memory");
+  DebugSerial.println();
 }
 
 // PPPOS 연결 시작
@@ -369,37 +398,21 @@ void MqttControlRelay()
     }
   }
 
-  modbus.writeMultipleHoldingRegisters(SLAVE_ID, WRITE_START_ADDRESS, writingRegisters, WRITE_QUANTITY);
+  modbus.setTransmitBuffer(0x03, writingRegisters[0]); // Write Type
+  modbus.setTransmitBuffer(0x04, writingRegisters[1]); // Write PW
+  modbus.setTransmitBuffer(0x05, writingRegisters[2]); // Write Relay
+  modbus.setTransmitBuffer(0x06, writingRegisters[3]); // Write Time
+  modbus_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
 
-  DebugSerial.println("MODBUS Writing done.");
+  DebugSerial.print("modbus_result: ");
+  DebugSerial.println(modbus_result);
+  // modbus.writeMultipleHoldingRegisters(SLAVE_ID, WRITE_START_ADDRESS, writingRegisters, WRITE_QUANTITY);
+  if (modbus_result == modbus.ku8MBSuccess)
+  {
+    DebugSerial.println("MODBUS Writing done.");
+  }
 
-  // while (true)
-  // {
-  //   if (modbus.writeMultipleHoldingRegisters(SLAVE_ID, WRITE_START_ADDRESS, writingRegisters, WRITE_QUANTITY)) // FuncCode : 0x10
-  //   {
-  //     DebugSerial.printf("[MODBUS] [slaveID]: %d\n", SLAVE_ID);
-  //     DebugSerial.printf("[MODBUS] [Write Type]: %d\n", writingRegisters[0]);
-  //     DebugSerial.print("[MODBUS] [Adv Write Relay]: ");
-  //     printBinary16(writingRegisters[2]);
-  //     DebugSerial.printf("[MODBUS] [Adv Write Time]: %d\n", writingRegisters[3]);
-
-  //     break;
-  //   }
-  //   else
-  //   {
-  //     Serial.println("[MODBUS] Cannot Read Holding Resisters...");
-  //     if (modbus.getTimeoutFlag())
-  //     {
-  //       Serial.println("TimeOut");
-  //     }
-  //     if (modbus.getExceptionResponse() > 0)
-  //     {
-  //       Serial.print("getExceptionResponse: ");
-  //       Serial.println(modbus.getExceptionResponse());
-  //     }
-  //     delay(5000);
-  //   }
-  // }
+  printBinary16(writingRegisters[2]);
 
   // 발행 주제 설정
   int suffix_length = strlen(suffix); // 추가할 문자열(suffix)의 길이 계산
@@ -540,15 +553,31 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  // /* Serial1 Initialization */
-  // SerialPort.begin(115200, SERIAL_8N1, 33, 32); // RXD1 : 33, TXD1 : 32
-
   // RS485 Setup
-  modbus.setTimeout(12000);
-  DebugSerial.println(" [MODBUS] SetTimeout");
-  modbus.begin(9600, SERIAL_8N1, rxPin, txPin); // 직렬 전송 설정 (baud, config, rxPin, txPin, invert)
-                                                // default config : SERIAL_8N1; { 데이터비트 8, 패리티 없음, 1 정지 비트}; E: 짝수 패리티, O: 홀수 패리티
-                                                // rxPin: 직렬 데이터 수신 핀; txPin: 직렬 데이터 전송 핀 (uint8_t)
+  // RS485 제어 핀 초기화
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
+  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  modbus.begin(SLAVE_ID, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // modbus.preTransmission(preTransmission);
+  // modbus.postTransmission(postTransmission);
+  // Auto FlowControl - NULL
+  modbus.preTransmission(NULL);
+  modbus.postTransmission(NULL);
+
+  // ModbusRTUMaster.h
+  // modbus.setTimeout(12000);
+  // DebugSerial.println(" [MODBUS] SetTimeout");
+  // modbus.begin(9600, SERIAL_8N1, rxPin, txPin); // 직렬 전송 설정 (baud, config, rxPin, txPin, invert)
+  //                                               // default config : SERIAL_8N1; { 데이터비트 8, 패리티 없음, 1 정지 비트}; E: 짝수 패리티, O: 홀수 패리티
+  //                                               // rxPin: 직렬 데이터 수신 핀; txPin: 직렬 데이터 전송 핀 (uint8_t)
   DebugSerial.println(" [MODBUS] Begin OK");
 
   DebugSerial.println("TYPE1SC Module Start!!!");
