@@ -9,6 +9,7 @@
 #include "soc/rtc_cntl_reg.h" // Disable brownout problems
 #include "driver/rtc_io.h"
 
+#include "SPIFFS.h"
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 
@@ -29,11 +30,71 @@
 #define EXT_ANT 4
 // #define EXT_LED 23
 
+// File System settings ***************************************************************************
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
+
+// Search for parameter in HTTP POST request
+const char *PARAM_INPUT_1 = "mqttUsername";
+const char *PARAM_INPUT_2 = "mqttPw";
+const char *PARAM_INPUT_3 = "hostId";
+const char *PARAM_INPUT_4 = "port";
+const char *PARAM_INPUT_5 = "sensorId_01";
+const char *PARAM_INPUT_6 = "slaveId_01";
+const char *PARAM_INPUT_7 = "sensorId_02";
+const char *PARAM_INPUT_8 = "slaveId_02";
+const char *PARAM_INPUT_9 = "relayId";
+const char *PARAM_INPUT_10 = "slaveId_relay";
+
+// Variables to save values from HTML form
+String mqttUsername;
+String mqttPw;
+String hostId;
+String port;
+String sensorId_01;
+String slaveId_01;
+String sensorId_02;
+String slaveId_02;
+String relayId;
+String slaveId_relay;
+
+// File paths to save input values permanently
+const char *mqttUsernamePath = "/mqttUsername.txt";
+const char *mqttPwPath = "/mqttPw.txt";
+const char *hostIdPath = "/hostId.txt";
+const char *portPath = "/port.txt";
+const char *sensorId_01Path = "/sensorId_01.txt";
+const char *slaveId_01Path = "/slaveId_01.txt";
+const char *sensorId_02Path = "/sensorId_02.txt";
+const char *slaveId_02Path = "/slaveId_02.txt";
+const char *relayIdPath = "/relayId.txt";
+const char *slaveId_relayPath = "/slaveId_relay.txt";
+
+unsigned long currentMillis = 0;
+unsigned long previousMillis = 0;
+
+void initSPIFFS();                                                 // Initialize SPIFFS
+String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
+void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
+bool isWMConfigDefined();                                          // Is Wifi Manager Configuration Defiend?
+bool allowsLoop = false;
+
+float temp = 0;
+float humi = 0;
+float ec = 0;
+bool isRainy = false;
+float soilPotential = 0;
+
+bool allowsPublishTEMP = false;
+bool allowsPublishHUMI = false;
+bool allowsPublishEC = false;
+bool allowsPublishRAIN = false;
+bool allowsPublishSoilP = false;
+
 // PPPOS, MQTT settings ***************************************************************************
 char *ppp_user = "daonTest01";
 char *ppp_pass = "daon7521";
 
-char *server = "example.com";
 String APN = "simplio.apn";
 TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
 
@@ -41,29 +102,32 @@ PPPOSClient ppposClient;
 PubSubClient client(ppposClient);
 bool atMode = true;
 
-// Set MQTT Device Name ***************************************************************************
-#define ReConnectID "relay01"
-#define DEVICE_NAME "/" + ReConnectID
+// Set SENSING_PERIOD *****************************************************************************
+#define SENSING_PERIOD 600 // 10 min
+#define PERIOD_CONSTANT 1000
 // ************************************************************************************************
 
 #define QOS 1
 
 // MQTT Topic *************************************************************************************
-// char *SUB_TOPIC = "type1sc/control/relay01/#"; // 구독 주제
-// char *PUB_TOPIC = "type1sc/update/relay01";    // 발행 주제
+// char *SUB_TOPIC = "type1sc/control/farmtalkSwitch00/#"; // 구독 주제
+// char *PUB_TOPIC = "type1sc/update/farmtalkSwitch00";    // 발행 주제
 
-#define MQTT_SERVER "broker.hivemq.com"
+#define MQTT_SERVER "broker.hivemq.com" // hostId로 대체
 
-String SUB_TOPIC = "type1sc/control"; // 구독 주제: type1sc/control
-String PUB_TOPIC = "type1sc/update";  // 발행 주제: type1sc/update
-
-const int PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_NAME).c_str()); // pub_topic의 길이 계산
+String SUB_TOPIC = "type1sc/control";       // 구독 주제: type1sc/control/farmtalkSwitch00/r-; msg: on/off/refresh
+String PUB_TOPIC = "type1sc/update";        // 발행 주제: type1sc/update/farmtalkSwitch00;
+String PUB_TOPIC_SENSOR = "type1sc/sensor"; // 온도 발행 주제 type1sc/sensor/farmtalkSwitch00/temp+humi+ec+rain+soilP; msg: value
 
 String WILL_TOPIC = "type1sc/disconnect";
 String WILL_MESSAGE = "DISCONNECTED.";
 
 #define MULTI_LEVEL_WILDCARD "/#"
 #define SINGLE_LEVEL_WILDCARD "/+"
+
+String clientId;     // == mqttUsername: farmtalkSwitch00
+String DEVICE_TOPIC; // /farmtalkSwitch00
+int PUB_TOPIC_length;
 
 String payloadBuffer = ""; // 메시지 스플릿을 위한 페이로드 버퍼 변수
 char *suffix = "";         // 추가할 문자열을 설정
@@ -73,8 +137,8 @@ char *suffix = "";         // 추가할 문자열을 설정
 #define BIT_OFF 0
 #define SHIFT_CONSTANT 8
 
-void MqttControlRelay();
 void publishNewTopic();
+void publishSensorData();
 
 String *Split(String sData, char cSeparator, int *scnt); // 문자열 파싱
 String *rStr = nullptr;                                  // 파싱된 문자열 저장변수
@@ -114,17 +178,59 @@ const uint8_t rxPin = 33; // RX-RO
 const uint8_t dePin = 13; // DE
 const uint8_t rePin = 14; // RE
 
-uint8_t modbus_result;
+uint8_t modbus_Relay_result;
+uint8_t modbus_Sensor_result;
 
 uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
-uint16_t readingRegister[1] = {0};
+uint16_t readingRegister[3] = {0, 0, 0};                     // 온습도, 감우, ec 등 읽기용
+uint16_t readingStatusRegister[1] = {0};                     // refresh 토픽: 상태 반환용
 
 uint8_t index_relay; // r1~r8: 0~7
 
-void Modbus_task(void *pvParameters); // Task에 등록할 modbus 작업
+// callback or loop 에서 modbus task를 실행 결정
+bool allowsModbusTask_Relay = false;
+// bool allowsModbusTask_Sensor = false;
 
-// callback에서 modbus task를 실행 결정
-bool allowsModbusTask = false;
+// 선택한 센서의 task를 실행여부 결정
+bool allowsModbusTask_Sensor_th = false;
+bool allowsModbusTask_Sensor_tm100 = false;
+bool allowsModbusTask_Sensor_rain = false;
+bool allowsModbusTask_Sensor_ec = false;
+bool allowsModbusTask_Sensor_soil = false;
+
+// 선택한 센서의 task가 선택되었는지 여부 - 한번 선택되면 불변해야함
+bool isSelectedModbusTask_Sensor_th = false;
+bool isSelectedModbusTask_Sensor_tm100 = false;
+bool isSelectedModbusTask_Sensor_rain = false;
+bool isSelectedModbusTask_Sensor_ec = false;
+bool isSelectedModbusTask_Sensor_soil = false;
+
+// 각 node task
+void ModbusTask_Relay(void *pvParameters);        // Task에 등록할 modbus relay 제어
+void ModbusTask_Sensor_th(void *pvParameters);    // 온습도 센서 task
+void ModbusTask_Sensor_tm100(void *pvParameters); // TM100 task
+void ModbusTask_Sensor_rain(void *pvParameters);  // 감우 센서 task
+void ModbusTask_Sensor_ec(void *pvParameters);    // 지온·지습·EC 센서 task
+void ModbusTask_Sensor_soil(void *pvParameters);  // 수분장력 센서 task
+
+// 각 센서별 Slave ID 지정
+int slaveId_th;
+int slaveId_tm100;
+int slaveId_rain;
+int slaveId_ec;
+int slaveId_soil;
+
+struct SensorTask
+{
+  const char *sensorId;         // sensorId: 센서 ID 문자열.
+  int *slaveId;                 // slaveId: 센서의 Slave ID를 저장할 변수 포인터
+  void (*taskFunction)(void *); // taskFunction: Task 함수 포인터.
+
+  bool *allowsModbusTask_Sensor;     // 실행할 sensor task를 선택할 bool 포인터
+  bool *isSelectedModbusTask_Sensor; // 해당 센서가 선택되었는지 여부 bool 포인터 - loop에서 태스크 활성화변수 변경 시 조건으로 사용
+};
+
+void createSensorTask(const char *sensorId_01, int slaveId_01, const char *sensorId_02, int slaveId_02, const SensorTask *tasks, size_t taskCount);
 
 void preTransmission();
 void postTransmission();
@@ -136,18 +242,32 @@ String testMsg4 = "";
 String testMsg5 = "";
 int testBit = -1;
 
+void createSensorTask(const char *sensorId_01, int INT_slaveId_01, const char *sensorId_02, int INT_slaveId_02, const SensorTask *tasks, size_t taskCount)
+{
+  for (size_t i = 0; i < taskCount; ++i) // 240530현재 5개 task
+  {
+    if (strcmp(sensorId_01, tasks[i].sensorId) == 0 || strcmp(sensorId_02, tasks[i].sensorId) == 0) // 양식 제출된 센서명과 구조체배열의 원소내 센서명이 같으면
+    {
+      *tasks[i].slaveId = (strcmp(sensorId_01, tasks[i].sensorId) == 0) ? INT_slaveId_01 : INT_slaveId_02; // 해당 센서의 slaveID 부여
+      *tasks[i].allowsModbusTask_Sensor = true;                                                            // 해당 센서의 태스크 활성화
+      *tasks[i].isSelectedModbusTask_Sensor = true;                                                        // 해당 센서가 선택되었는지 여부: 불변 - loop에서 태스크 활성화변수 변경 시 조건으로 사용
+      xTaskCreate(tasks[i].taskFunction, tasks[i].sensorId, 2048, NULL, 6, NULL);                          // 해당 센서의 태스크 등록
+    }
+  }
+}
+
 // pppos client task보다 우선하는 modbus task
-void Modbus_task(void *pvParameters)
+void ModbusTask_Relay(void *pvParameters)
 {
   HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
-  modbus_result = modbus.ku8MBInvalidCRC;
+  modbus_Relay_result = modbus.ku8MBInvalidCRC;
 
   /* Serial1 Initialization */
   SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
   // Modbus slave ID 5
-  modbus.begin(SLAVE_ID, SerialPort);
+  modbus.begin(relayId.toInt(), SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -157,20 +277,20 @@ void Modbus_task(void *pvParameters)
 
   while (1)
   {
-    if (allowsModbusTask) // callback에서 허용해줌
+    if (allowsModbusTask_Relay) // callback에서 허용해줌
     {
       // refresh 토픽일 경우 릴레이 상태 업데이트
       if (rStr[0] == "refresh")
       {
         // relay status
-        modbus_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY);
+        modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY);
 
-        if (modbus_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
-          readingRegister[0] = modbus.getResponseBuffer(0);
+          readingStatusRegister[0] = modbus.getResponseBuffer(0);
         }
 
-        allowsModbusTask = false;
+        allowsModbusTask_Relay = false;
       }
 
       // (r1~r8) 일반적인 릴레이 제어 작업
@@ -219,29 +339,73 @@ void Modbus_task(void *pvParameters)
         {
           // testMsg4 = "ok";
         }
-        modbus_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-        // DebugSerial.print("modbus_result: ");
-        // DebugSerial.println(modbus_result);
+        modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
+        // DebugSerial.print("modbus_Relay_result: ");
+        // DebugSerial.println(modbus_Relay_result);
 
-        if (modbus_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
         }
         else
         {
-          testBit = modbus_result;
+          testBit = modbus_Relay_result;
         }
 
         // printBinary16(writingRegisters[2]);
 
-        allowsModbusTask = false;
+        allowsModbusTask_Relay = false;
       }
     }
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
+
+// 온습도 센서 task
+void ModbusTask_Sensor_th(void *pvParameters)
+{
+  HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
+
+  /* Serial1 Initialization */
+  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 5
+  modbus.begin(slaveId_th, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  while (1)
+  {
+    if (allowsModbusTask_Sensor_th) // loop에서 허용해줌
+    {
+      // TZ_THT02
+      modbus_Sensor_result = modbus.readHoldingRegisters(0, 2); // 0x03
+
+      if (modbus_Sensor_result == modbus.ku8MBSuccess)
+      {
+        temp = float(modbus.getResponseBuffer(0) / 10.00F);
+        humi = float(modbus.getResponseBuffer(1) / 10.00F);
+
+        // Get response data from sensor
+        allowsModbusTask_Sensor_th = false;
+      }
+    }
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+void ModbusTask_Sensor_tm100(void *pvParameters) {} // TM100 task
+void ModbusTask_Sensor_rain(void *pvParameters) {}  // 감우 센서 task
+void ModbusTask_Sensor_ec(void *pvParameters) {}    // 지온·지습·EC 센서 task
+void ModbusTask_Sensor_soil(void *pvParameters) {}  // 수분장력 센서 task
 
 void preTransmission()
 {
@@ -340,8 +504,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r1";  // 추가할 문자열을 설정
       index_relay = 0; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -353,8 +517,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r2";  // 추가할 문자열을 설정
       index_relay = 1; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -365,8 +529,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r3";  // 추가할 문자열을 설정
       index_relay = 2; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -377,8 +541,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r4";  // 추가할 문자열을 설정
       index_relay = 3; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -389,8 +553,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r5";  // 추가할 문자열을 설정
       index_relay = 4; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -401,8 +565,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r6";  // 추가할 문자열을 설정
       index_relay = 5; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -413,8 +577,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r7";  // 추가할 문자열을 설정
       index_relay = 6; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -425,8 +589,8 @@ void callback(char *topic, byte *payload, unsigned int length)
       suffix = "/r8";  // 추가할 문자열을 설정
       index_relay = 7; // r1~r8: 0~7
 
-      allowsModbusTask = true;
-      while (allowsModbusTask)
+      allowsModbusTask_Relay = true;
+      while (allowsModbusTask_Relay)
       {
         delay(1);
       }
@@ -435,13 +599,13 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   else if (rStr[0] == "refresh")
   {
-    allowsModbusTask = true;
-    while (allowsModbusTask)
+    allowsModbusTask_Relay = true;
+    while (allowsModbusTask_Relay)
     {
       delay(1);
     }
-    // topic: "type1sc/update/relay01
-    client.publish((PUB_TOPIC + DEVICE_NAME).c_str(), std::to_string(readingRegister[0]).c_str());
+    // topic: "type1sc/update/farmtalkSwitch00
+    client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), std::to_string(readingStatusRegister[0]).c_str());
   }
 
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
@@ -450,8 +614,8 @@ void callback(char *topic, byte *payload, unsigned int length)
     // 아무것도 하지 않음
   }
 
-  DebugSerial.print("readingRegister: ");
-  DebugSerial.println(readingRegister[0]);
+  DebugSerial.print("readingStatusRegister: ");
+  DebugSerial.println(readingStatusRegister[0]);
   DebugSerial.print("writingRegisters[2]: ");
   DebugSerial.println(writingRegisters[2]);
 
@@ -471,7 +635,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   // testMsg5 = "";
   testBit = -1;
 
-  readingRegister[0] = 0;
+  readingStatusRegister[0] = 0;
   writingRegisters[2] = 0; // mapping write
   writingRegisters[3] = 0; // delay time
   payloadBuffer = "";
@@ -511,16 +675,16 @@ void reconnect()
   {
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
-    // if (client.connect(ReConnectID)) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
-    if (client.connect(ReConnectID, (WILL_TOPIC + DEVICE_NAME).c_str(), QOS, 0, WILL_MESSAGE.c_str()))
+    // if (client.connect(clientId.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
+    if (client.connect(clientId.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (WILL_TOPIC + DEVICE_TOPIC).c_str(), QOS, 0, WILL_MESSAGE.c_str()))
     {
       DebugSerial.println("connected");
 
-      client.subscribe((SUB_TOPIC + DEVICE_NAME + MULTI_LEVEL_WILDCARD).c_str(), QOS);
+      client.subscribe((SUB_TOPIC + DEVICE_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
 
       // Once connected, publish an announcement...
-      client.publish((PUB_TOPIC + DEVICE_NAME).c_str(), "MQTT Device Ready."); // 준비되었음을 알림(publish)
-                                                                               // ... and resubscribe
+      client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), (clientId + " Ready.").c_str()); // 준비되었음을 알림(publish)
+                                                                                          // ... and resubscribe
     }
     else // 실패 시 재연결 시도
     {
@@ -533,108 +697,6 @@ void reconnect()
   }
 }
 
-// 릴레이 동작 함수
-void MqttControlRelay()
-{
-  // // refresh 토픽일 경우 릴레이 상태 업데이트
-  // if (rStr[0] == "refresh")
-  // {
-  //   // relay status
-  //   modbus_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY);
-  //   // DebugSerial.print("modbus_result: ");
-  //   // DebugSerial.println(modbus_result);
-
-  //   if (modbus_result == modbus.ku8MBSuccess)
-  //   {
-  //     readingRegister[0] = modbus.getResponseBuffer(0);
-  //     // DebugSerial.println(modbus.getResponseBuffer(0));
-  //     // DebugSerial.println("MODBUS Reading done.");
-  //   }
-  //   // DebugSerial.print("readingRegister: ");
-  //   // DebugSerial.println(readingRegister[0]);
-
-  //   // printBinary8(writingRegisters[0]);
-
-  //   // topic: "type1sc/update/relay01
-  //   client.publish((PUB_TOPIC + DEVICE_NAME).c_str(), std::to_string(readingRegister[0]).c_str());
-  // }
-
-  // // 일반적인 릴레이 제어 작업
-  // else
-  // {
-  //   uint16_t selector_relay = BIT_SELECT << index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
-
-  //   // if (strstr((char *)p, "on"))
-  //   if (strstr(payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
-  //   {
-  //     if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
-  //     {
-  //       writingRegisters[2] = selector_relay | BIT_ON << index_relay;
-  //       // DebugSerial.print("writingRegisters[2]: ");
-  //       // DebugSerial.println(writingRegisters[2]);
-  //     }
-  //     else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
-  //     {
-  //       writingRegisters[2] = index_relay << 1 | BIT_ON;
-  //     }
-  //   }
-  //   if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
-  //   {
-  //     if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
-  //     {
-  //       writingRegisters[2] = selector_relay | BIT_OFF << index_relay;
-  //       // DebugSerial.print("writingRegisters[2]: ");
-  //       // DebugSerial.println(writingRegisters[2]);
-  //     }
-  //     else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
-  //     {
-  //       writingRegisters[2] = index_relay << 1 | BIT_OFF;
-  //     }
-  //   }
-
-  //   modbus.setTransmitBuffer(0x03, writingRegisters[0]); // Write Type
-  //   modbus.setTransmitBuffer(0x04, writingRegisters[1]); // Write PW
-  //   modbus.setTransmitBuffer(0x05, writingRegisters[2]); // Write Relay
-  //   modbus.setTransmitBuffer(0x06, writingRegisters[3]); // Write Time
-  //   modbus_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-  //   // DebugSerial.print("modbus_result: ");
-  //   // DebugSerial.println(modbus_result);
-
-  //   if (modbus_result == modbus.ku8MBSuccess)
-  //   {
-  //     // DebugSerial.println("MODBUS Writing done.");
-  //   }
-
-  //   // printBinary16(writingRegisters[2]);
-
-  //   // 발행 주제 설정
-  //   int suffix_length = strlen(suffix); // 추가할 문자열(suffix)의 길이 계산
-
-  //   // 새로운 문자열을 저장할 메모리 할당
-  //   char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
-  //   strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_NAME).c_str());                   // PUB_TOPIC의 내용을 새로운 문자열에 복사
-  //   strcat(new_PUB_TOPIC, suffix);                                              // suffix를 새로운 문자열에 추가
-
-  //   // topic: "type1sc/update/relay01" + "r-"
-  //   client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
-  //   // DebugSerial.print("Publish Topic: ");
-  //   // DebugSerial.println(new_PUB_TOPIC);
-  //   // DebugSerial.print("Message: ");
-  //   // DebugSerial.println(payloadBuffer.c_str());
-
-  //   // DebugSerial.println(suffix);
-  //   // DebugSerial.println(suffix_length);
-  //   // DebugSerial.println(PUB_TOPIC + DEVICE_NAME);
-  //   // DebugSerial.println(PUB_TOPIC_length);
-
-  //   // DebugSerial.println(new_PUB_TOPIC);
-  //   // DebugSerial.println(payloadBuffer.c_str());
-
-  //   payloadBuffer = "";
-  //   free(new_PUB_TOPIC);
-  // }
-}
-
 // 릴레이 제어 후 제어완료 토픽/메시지 발행
 void publishNewTopic()
 {
@@ -643,10 +705,10 @@ void publishNewTopic()
 
   // 새로운 문자열을 저장할 메모리 할당
   char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
-  strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_NAME).c_str());                   // PUB_TOPIC의 내용을 새로운 문자열에 복사
+  strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_TOPIC).c_str());                  // PUB_TOPIC의 내용을 새로운 문자열에 복사
   strcat(new_PUB_TOPIC, suffix);                                              // suffix를 새로운 문자열에 추가
 
-  // topic: "type1sc/update/relay01" + "r-"
+  // topic: "type1sc/update/farmtalkSwitch00" + "r-"
   client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
   // DebugSerial.print("Publish Topic: ");
   // DebugSerial.println(new_PUB_TOPIC);
@@ -655,7 +717,7 @@ void publishNewTopic()
 
   // DebugSerial.println(suffix);
   // DebugSerial.println(suffix_length);
-  // DebugSerial.println(PUB_TOPIC + DEVICE_NAME);
+  // DebugSerial.println(PUB_TOPIC + DEVICE_TOPIC);
   // DebugSerial.println(PUB_TOPIC_length);
 
   // DebugSerial.println(new_PUB_TOPIC);
@@ -663,6 +725,36 @@ void publishNewTopic()
 
   payloadBuffer = "";
   free(new_PUB_TOPIC);
+}
+
+void publishSensorData()
+{
+  // topic: "type1sc/sensor/farmtalkSwitch00/@"
+  // 온도
+  if (allowsPublishTEMP)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp").c_str(), String(temp).c_str()); // 릴레이 동작 후 완료 메시지 publish
+    DebugSerial.print("Publish: [");
+    DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp");
+    DebugSerial.println("] ");
+    DebugSerial.print(temp);
+    DebugSerial.println("℃");
+
+    allowsPublishTEMP = false;
+  }
+
+  // 습도
+  if (allowsPublishHUMI)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi").c_str(), String(humi).c_str()); // 릴레이 동작 후 완료 메시지 publish
+    DebugSerial.print("Publish: [");
+    DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi");
+    DebugSerial.println("] ");
+    DebugSerial.print(humi);
+    DebugSerial.println("%");
+
+    allowsPublishHUMI = false;
+  }
 }
 
 // 문자열 분할 함수 Split
@@ -735,6 +827,7 @@ bool isNumeric(String str)
   }
   return true; // 모든 문자가 숫자라면 true 반환
 }
+
 // 8자리 이진수 출력
 void printBinary8(uint16_t num)
 {
@@ -769,6 +862,68 @@ const char *getStatus(int value)
   return (value == 1) ? "on" : "off";
 }
 
+// Initialize SPIFFS
+void initSPIFFS()
+{
+  if (!SPIFFS.begin(true))
+  {
+    Serial.println("An error has occurred while mounting SPIFFS");
+  }
+  Serial.println("SPIFFS mounted successfully");
+}
+
+// Read File from SPIFFS
+String readFile(fs::FS &fs, const char *path)
+{
+  Serial.printf("Reading file: %s\r\n", path);
+
+  File file = fs.open(path);
+  if (!file || file.isDirectory())
+  {
+    Serial.println("- failed to open file for reading");
+    return String();
+  }
+
+  String fileContent;
+  while (file.available())
+  {
+    fileContent = file.readStringUntil('\n');
+    break;
+  }
+  return fileContent;
+}
+
+// Write file to SPIFFS
+void writeFile(fs::FS &fs, const char *path, const char *message)
+{
+  Serial.printf("Writing file: %s\r\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if (!file)
+  {
+    Serial.println("- failed to open file for writing");
+    return;
+  }
+  if (file.print(message))
+  {
+    Serial.println("- file written");
+  }
+  else
+  {
+    Serial.println("- write failed");
+  }
+}
+
+bool isWMConfigDefined()
+{
+  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || sensorId_01 == "" || slaveId_01 == "" || sensorId_02 == "" || slaveId_02 == "" || relayId == "" || slaveId_relay == "")
+  {
+    Serial.println("Undefined Form Submitted...");
+    return false;
+  }
+  return true;
+}
+
 void setup()
 {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -777,101 +932,344 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  // RS485 Setup
-  // RS485 제어 핀 초기화
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
+  // File System Setup
+  initSPIFFS();
 
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
+  // Load values saved in SPIFFS
+  mqttUsername = readFile(SPIFFS, mqttUsernamePath);
+  mqttPw = readFile(SPIFFS, mqttPwPath);
+  hostId = readFile(SPIFFS, hostIdPath);
+  port = readFile(SPIFFS, portPath);
+  sensorId_01 = readFile(SPIFFS, sensorId_01Path);
+  slaveId_01 = readFile(SPIFFS, slaveId_01Path);
+  sensorId_02 = readFile(SPIFFS, sensorId_02Path);
+  slaveId_02 = readFile(SPIFFS, slaveId_02Path);
+  relayId = readFile(SPIFFS, relayIdPath);
+  slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
 
-  DebugSerial.println("TYPE1SC Module Start!!!");
+  // Debug Print
+  DebugSerial.print("mqttUsername in SPIFFS: ");
+  DebugSerial.println(mqttUsername);
+  DebugSerial.print("mqttPw in SPIFFS: ");
+  DebugSerial.println(mqttPw.length() == 0 ? "NO password." : "Password exists.");
+  DebugSerial.print("hostId in SPIFFS: ");
+  DebugSerial.println(hostId);
+  DebugSerial.print("port in SPIFFS: ");
+  DebugSerial.println(port);
+  DebugSerial.print("sensorId_01 in SPIFFS: ");
+  DebugSerial.println(sensorId_01);
+  DebugSerial.print("slaveId_01 in SPIFFS: ");
+  DebugSerial.println(slaveId_01);
+  DebugSerial.print("sensorId_02 in SPIFFS: ");
+  DebugSerial.println(sensorId_02);
+  DebugSerial.print("slaveId_02 in SPIFFS: ");
+  DebugSerial.println(slaveId_02);
+  DebugSerial.print("relayId in SPIFFS: ");
+  DebugSerial.println(relayId);
+  DebugSerial.print("slaveId_relay in SPIFFS: ");
+  DebugSerial.println(slaveId_relay);
 
-  extAntenna();
+  DebugSerial.println();
 
-  /* TYPE1SC Module Initialization */
-  if (TYPE1SC.init())
+  // 설정 안된 상태: AP모드 진입(wifi config reset): softAP() 메소드
+  if (!isWMConfigDefined())
   {
-    DebugSerial.println("TYPE1SC Module Error!!!");
+    // Connect to Wi-Fi network with SSID and pass
+    Serial.println("Setting AP (Access Point)");
+    // NULL sets an open Access Point
+    WiFi.softAP("FarmtalkSwitch-Manager-01", NULL);
+
+    IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
+    Serial.print("AP IP address: ");
+    Serial.println(IP);
+
+    // Web Server Root URL
+    // GET방식
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(SPIFFS, "/wifimanager.html", "text/html"); });
+
+    server.serveStatic("/", SPIFFS, "/");
+    // POST방식
+    server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
+              {
+      int params = request->params();
+      for(int i=0;i<params;i++){
+        AsyncWebParameter* p = request->getParam(i);
+        if(p->isPost()){
+          // HTTP POST mqttUsername value
+          if (p->name() == PARAM_INPUT_1) {
+            mqttUsername = p->value().c_str();
+            Serial.print("mqttUsername set to: ");
+            Serial.println(mqttUsername);
+            // Write file to save value
+            writeFile(SPIFFS, mqttUsernamePath, mqttUsername.c_str());
+          }
+          // HTTP POST mqttPw value
+          if (p->name() == PARAM_INPUT_2)
+          {
+            mqttPw = p->value().c_str();
+            Serial.print("mqttPw set to: ");
+            Serial.println(mqttPw);
+            // Write file to save value
+            writeFile(SPIFFS, mqttPwPath, mqttPw.c_str());
+          }
+          // HTTP POST hostId value
+          if (p->name() == PARAM_INPUT_3)
+          {
+            hostId = p->value().c_str();
+            Serial.print("hostId set to: ");
+            Serial.println(hostId);
+            // Write file to save value
+            writeFile(SPIFFS, hostIdPath, hostId.c_str());
+          }
+          // HTTP POST port value
+          if (p->name() == PARAM_INPUT_4)
+          {
+            port = p->value().c_str();
+            Serial.print("port set to: ");
+            Serial.println(port);
+            // Write file to save value
+            writeFile(SPIFFS, portPath, port.c_str());
+          }
+          // HTTP POST sensorId_01 value
+          if (p->name() == PARAM_INPUT_5)
+          {
+            sensorId_01 = p->value().c_str();
+            Serial.print("sensorId_01 set to: ");
+            Serial.println(sensorId_01);
+            // Write file to save value
+            writeFile(SPIFFS, sensorId_01Path, sensorId_01.c_str());
+          }
+          // HTTP POST slaveId_01 value
+          if (p->name() == PARAM_INPUT_6)
+          {
+            slaveId_01 = p->value().c_str();
+            Serial.print("slaveId_01 set to: ");
+            Serial.println(slaveId_01);
+            // Write file to save value
+            writeFile(SPIFFS, slaveId_01Path, slaveId_01.c_str());
+          }
+          // HTTP POST sensorId_02 value
+          if (p->name() == PARAM_INPUT_7)
+          {
+            sensorId_02 = p->value().c_str();
+            Serial.print("sensorId_02 set to: ");
+            Serial.println(sensorId_02);
+            // Write file to save value
+            writeFile(SPIFFS, sensorId_02Path, sensorId_02.c_str());
+          }
+          // HTTP POST slaveId_02 value
+          if (p->name() == PARAM_INPUT_8)
+          {
+            slaveId_02 = p->value().c_str();
+            Serial.print("slaveId_02 set to: ");
+            Serial.println(slaveId_02);
+            // Write file to save value
+            writeFile(SPIFFS, slaveId_02Path, slaveId_02.c_str());
+          }
+          // HTTP POST relayId value
+          if (p->name() == PARAM_INPUT_9)
+          {
+            relayId = p->value().c_str();
+            Serial.print("relayId set to: ");
+            Serial.println(relayId);
+            // Write file to save value
+            writeFile(SPIFFS, relayIdPath, relayId.c_str());
+          }
+          // HTTP POST slaveId_relay value
+          if (p->name() == PARAM_INPUT_10)
+          {
+            slaveId_relay = p->value().c_str();
+            Serial.print("slaveId_relay set to: ");
+            Serial.println(slaveId_relay);
+            // Write file to save value
+            writeFile(SPIFFS, slaveId_relayPath, slaveId_relay.c_str());
+          }
+          Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+        }
+      }
+      // ESP가 양식 세부 정보를 수신했음을 알 수 있도록 일부 텍스트가 포함된 응답을 send
+      request->send(200, "text/plain", "Done. ESP will restart.");
+      delay(3000);
+      ESP.restart(); });
+    server.begin();
   }
 
-  /* Network Regsistraiton Check */
-  while (TYPE1SC.canConnect() != 0)
-  {
-    DebugSerial.println("Network not Ready !!!");
-    delay(2000);
-  }
-
-  /* Get Time (GMT, (+36/4) ==> Korea +9hour) */
-  char szTime[32];
-  if (TYPE1SC.getCCLK(szTime, sizeof(szTime)) == 0)
-  {
-    DebugSerial.print("Time : ");
-    DebugSerial.println(szTime);
-  }
-  delay(1000);
-
-  int rssi, rsrp, rsrq, sinr;
-  // AT커맨드로 네트워크 정보 획득 (3회)
-  for (int i = 0; i < 3; i++)
-  {
-    /* Get RSSI */
-    if (TYPE1SC.getRSSI(&rssi) == 0)
-    {
-      DebugSerial.println("Get RSSI Data");
-    }
-    /* Get RSRP */
-    if (TYPE1SC.getRSRP(&rsrp) == 0)
-    {
-      DebugSerial.println("Get RSRP Data");
-    }
-    /* Get RSRQ */
-    if (TYPE1SC.getRSRQ(&rsrq) == 0)
-    {
-      DebugSerial.println("Get RSRQ Data");
-    }
-    /* Get SINR */
-    if (TYPE1SC.getSINR(&sinr) == 0)
-    {
-      DebugSerial.println("Get SINR Data");
-    }
-    delay(1000);
-  }
-
-  // ppp모드로 변경
-  if (TYPE1SC.setPPP() == 0)
-  {
-    DebugSerial.println("PPP mode change");
-    atMode = false;
-  }
-
-  String RF_STATUS = "RSSI: " + String(rssi) +
-                     " RSRP:" + String(rsrp) + " RSRQ:" + String(rsrq) +
-                     " SINR:" + String(sinr);
-  DebugSerial.println("[RF_STATUS]");
-  DebugSerial.println(RF_STATUS);
-
-  DebugSerial.println("TYPE1SC Module Ready!!!");
-  // pinMode(EXT_LED, OUTPUT);
-
-  /* PPPOS Setup */
-  PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, ppp_user, ppp_pass); // PPPOS 설정
-  client.setServer(MQTT_SERVER, 1883);                                // MQTT 클라이언트를 설정
-                                                                      // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
-  client.setCallback(callback);                                       // mqtt 메시지 수신 콜백 등록
-  DebugSerial.println("Starting PPPOS...");
-
-  if (startPPPOS())
-  {
-    DebugSerial.println("Starting PPPOS... OK");
-  }
+  // 설정 완료 후: LTE/PPPOS/MQTT 연결
   else
   {
-    DebugSerial.println("Starting PPPOS... Failed");
-  }
+    // Topic 관련 변수 초기화
+    clientId = mqttUsername;
+    DEVICE_TOPIC = "/" + clientId;
+    PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_TOPIC).c_str()); // pub_topic의 길이 계산
 
-  xTaskCreate(&Modbus_task, "Modbus_task", 2048, NULL, 6, NULL); // Task 생성 및 등록 (PPPOS:5, MODBUS:6)
+    // 240528
+
+    // RS485 Setup
+    // RS485 제어 핀 초기화
+    pinMode(dePin, OUTPUT);
+    pinMode(rePin, OUTPUT);
+
+    // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+    digitalWrite(dePin, LOW);
+    digitalWrite(rePin, LOW);
+
+    DebugSerial.println("TYPE1SC Module Start!!!");
+
+    extAntenna();
+
+    /* TYPE1SC Module Initialization */
+    if (TYPE1SC.init())
+    {
+      DebugSerial.println("TYPE1SC Module Error!!!");
+    }
+
+    /* Network Regsistraiton Check */
+    while (TYPE1SC.canConnect() != 0)
+    {
+      DebugSerial.println("Network not Ready !!!");
+      delay(2000);
+    }
+
+    /* Get Time (GMT, (+36/4) ==> Korea +9hour) */
+    char szTime[32];
+    if (TYPE1SC.getCCLK(szTime, sizeof(szTime)) == 0)
+    {
+      DebugSerial.print("Time : ");
+      DebugSerial.println(szTime);
+    }
+    delay(1000);
+
+    int rssi, rsrp, rsrq, sinr;
+    // AT커맨드로 네트워크 정보 획득 (3회)
+    for (int i = 0; i < 3; i++)
+    {
+      /* Get RSSI */
+      if (TYPE1SC.getRSSI(&rssi) == 0)
+      {
+        DebugSerial.println("Get RSSI Data");
+      }
+      /* Get RSRP */
+      if (TYPE1SC.getRSRP(&rsrp) == 0)
+      {
+        DebugSerial.println("Get RSRP Data");
+      }
+      /* Get RSRQ */
+      if (TYPE1SC.getRSRQ(&rsrq) == 0)
+      {
+        DebugSerial.println("Get RSRQ Data");
+      }
+      /* Get SINR */
+      if (TYPE1SC.getSINR(&sinr) == 0)
+      {
+        DebugSerial.println("Get SINR Data");
+      }
+      delay(1000);
+    }
+
+    // ppp모드로 변경
+    if (TYPE1SC.setPPP() == 0)
+    {
+      DebugSerial.println("PPP mode change");
+      atMode = false;
+    }
+
+    String RF_STATUS = "RSSI: " + String(rssi) +
+                       " RSRP:" + String(rsrp) + " RSRQ:" + String(rsrq) +
+                       " SINR:" + String(sinr);
+    DebugSerial.println("[RF_STATUS]");
+    DebugSerial.println(RF_STATUS);
+
+    DebugSerial.println("TYPE1SC Module Ready!!!");
+    // pinMode(EXT_LED, OUTPUT);
+
+    /* PPPOS Setup */
+    PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, ppp_user, ppp_pass); // PPPOS 설정
+    client.setServer(hostId.c_str(), port.toInt());                     // MQTT 클라이언트를 설정
+                                                                        // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
+    client.setCallback(callback);                                       // mqtt 메시지 수신 콜백 등록
+    DebugSerial.println("Starting PPPOS...");
+
+    if (startPPPOS())
+    {
+      DebugSerial.println("Starting PPPOS... OK");
+    }
+    else
+    {
+      DebugSerial.println("Starting PPPOS... Failed");
+    }
+
+    xTaskCreate(&ModbusTask_Relay, "ModbusTask_Relay", 2048, NULL, 7, NULL); // Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+
+    // 각 센서 ID와 해당하는 Slave ID 변수, Task 함수를 매핑한 배열입니다.
+    // 센서 추가 시 이 배열에 원소 추가하면 됨
+    // sensorId: 센서 ID 문자열.
+    // slaveId: 센서의 Slave ID를 저장할 변수 포인터
+    // taskFunction: Task 함수 포인터.
+    const SensorTask sensorTasks[] = {
+        {"sensorId_th", &slaveId_th, ModbusTask_Sensor_th, &allowsModbusTask_Sensor_th, &isSelectedModbusTask_Sensor_th},
+        {"sensorId_tm100", &slaveId_tm100, ModbusTask_Sensor_tm100, &allowsModbusTask_Sensor_tm100, &isSelectedModbusTask_Sensor_tm100},
+        {"sensorId_rain", &slaveId_rain, ModbusTask_Sensor_rain, &allowsModbusTask_Sensor_rain, &isSelectedModbusTask_Sensor_rain},
+        {"sensorId_ec", &slaveId_ec, ModbusTask_Sensor_ec, &allowsModbusTask_Sensor_ec, &isSelectedModbusTask_Sensor_ec},
+        {"sensorId_soil", &slaveId_soil, ModbusTask_Sensor_soil, &allowsModbusTask_Sensor_soil, &isSelectedModbusTask_Sensor_soil}};
+
+    createSensorTask(sensorId_01.c_str(), slaveId_01.toInt(), sensorId_02.c_str(), slaveId_02.toInt(), sensorTasks, sizeof(sensorTasks) / sizeof(sensorTasks[0]));
+
+    // // 온습도 센서 task 생성 및 등록 (우선순위: 6)
+    // if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
+    // {
+    //   if (sensorId_01 == "sensorId_th")
+    //     slaveId_th = slaveId_01.toInt();
+    //   else if (sensorId_02 == "sensorId_th")
+    //     slaveId_th = slaveId_02.toInt();
+
+    //   xTaskCreate(&ModbusTask_Sensor_th, "ModbusTask_Sensor_th", 2048, NULL, 6, NULL);
+    // }
+
+    // // TM100 센서 task 생성 및 등록 (우선순위: 6)
+    // if (sensorId_01 == "sensorId_tm100" || sensorId_02 == "sensorId_tm100")
+    // {
+    //   if (sensorId_01 == "sensorId_tm100")
+    //     slaveId_tm100 = slaveId_01.toInt();
+    //   else if (sensorId_02 == "sensorId_tm100")
+    //     slaveId_tm100 = slaveId_02.toInt();
+
+    //   xTaskCreate(&ModbusTask_Sensor_tm100, "ModbusTask_Sensor_tm100", 2048, NULL, 6, NULL);
+    // }
+
+    // // 감우 센서 task 생성 및 등록 (우선순위: 6)
+    // if (sensorId_01 == "sensorId_rain" || sensorId_02 == "sensorId_rain")
+    // {
+    //   if (sensorId_01 == "sensorId_rain")
+    //     slaveId_rain = slaveId_01.toInt();
+    //   else if (sensorId_02 == "sensorId_rain")
+    //     slaveId_rain = slaveId_02.toInt();
+
+    //   xTaskCreate(&ModbusTask_Sensor_rain, "ModbusTask_Sensor_rain", 2048, NULL, 6, NULL);
+    // }
+
+    // // 지온·지습·EC 센서 task 생성 및 등록 (우선순위: 6)
+    // if (sensorId_01 == "sensorId_ec" || sensorId_02 == "sensorId_ec")
+    // {
+    //   if (sensorId_01 == "sensorId_ec")
+    //     slaveId_ec = slaveId_01.toInt();
+    //   else if (sensorId_02 == "sensorId_ec")
+    //     slaveId_ec = slaveId_02.toInt();
+
+    //   xTaskCreate(&ModbusTask_Sensor_ec, "ModbusTask_Sensor_ec", 2048, NULL, 6, NULL);
+    // }
+
+    // // 수분장력 센서 task 생성 및 등록 (우선순위: 6)
+    // if (sensorId_01 == "sensorId_soil" || sensorId_02 == "sensorId_soil")
+    // {
+    //   if (sensorId_01 == "sensorId_soil")
+    //     slaveId_soil = slaveId_01.toInt();
+    //   else if (sensorId_02 == "sensorId_soil")
+    //     slaveId_soil = slaveId_02.toInt();
+
+    //   xTaskCreate(&ModbusTask_Sensor_soil, "ModbusTask_Sensor_soil", 2048, NULL, 6, NULL);
+    // }
+  }
 }
 
 void loop()
@@ -883,5 +1281,24 @@ void loop()
       reconnect();
     }
     client.loop();
+  }
+
+  //
+  currentMillis = millis();
+  if (currentMillis - previousMillis > SENSING_PERIOD * PERIOD_CONSTANT)
+  {
+    if (isSelectedModbusTask_Sensor_th)
+    {
+      allowsModbusTask_Sensor_th = true; // 센서 task 활성화: 센서정보 수집
+
+      while (allowsModbusTask_Sensor_th) // 수집완료까지 대기, 완료되면 publish로
+      {
+        delay(1);
+      }
+      allowsPublishTEMP = true;
+      allowsPublishHUMI = true;
+      publishSensorData();
+    }
+    previousMillis = currentMillis;
   }
 }
