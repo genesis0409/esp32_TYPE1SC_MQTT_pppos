@@ -84,6 +84,7 @@ float humi = 0;
 float ec = 0;
 bool isRainy = false;
 float soilPotential = 0;
+bool errBit;
 
 bool allowsPublishTEMP = false;
 bool allowsPublishHUMI = false;
@@ -117,7 +118,7 @@ bool atMode = true;
 
 String SUB_TOPIC = "type1sc/control";       // 구독 주제: type1sc/control/farmtalkSwitch00/r-; msg: on/off/refresh
 String PUB_TOPIC = "type1sc/update";        // 발행 주제: type1sc/update/farmtalkSwitch00;
-String PUB_TOPIC_SENSOR = "type1sc/sensor"; // 온도 발행 주제 type1sc/sensor/farmtalkSwitch00/temp+humi+ec+rain+soilP; msg: value
+String PUB_TOPIC_SENSOR = "type1sc/sensor"; // 센서 발행 주제 type1sc/sensor/farmtalkSwitch00/temp+humi+ec+rain+soilP; msg: value
 
 String WILL_TOPIC = "type1sc/disconnect";
 String WILL_MESSAGE = "DISCONNECTED.";
@@ -180,6 +181,8 @@ const uint8_t rePin = 14; // RE
 
 uint8_t modbus_Relay_result;
 uint8_t modbus_Sensor_result;
+
+void checkModbusErrorStatus();
 
 uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 uint16_t readingRegister[3] = {0, 0, 0};                     // 온습도, 감우, ec 등 읽기용
@@ -373,7 +376,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
 
   /* Serial1 Initialization */
   SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 5
+  // Modbus slave ID
   modbus.begin(slaveId_th, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
@@ -395,17 +398,137 @@ void ModbusTask_Sensor_th(void *pvParameters)
         humi = float(modbus.getResponseBuffer(1) / 10.00F);
 
         // Get response data from sensor
-        allowsModbusTask_Sensor_th = false;
+        // allowsModbusTask_Sensor_th = false;
+
+        allowsPublishTEMP = true;
+        allowsPublishHUMI = true;
+        publishSensorData();
       }
+      // 오류 처리
+      else
+      {
+        // loop()에서 modbus_Sensor_result switch로 조건별 출력
+      }
+      allowsModbusTask_Sensor_th = false;
     }
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
-void ModbusTask_Sensor_tm100(void *pvParameters) {} // TM100 task
-void ModbusTask_Sensor_rain(void *pvParameters) {}  // 감우 센서 task
-void ModbusTask_Sensor_ec(void *pvParameters) {}    // 지온·지습·EC 센서 task
-void ModbusTask_Sensor_soil(void *pvParameters) {}  // 수분장력 센서 task
+// TM100 task
+void ModbusTask_Sensor_tm100(void *pvParameters)
+{
+  HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
+  modbus.ku8MBIllegalFunction;
+  /* Serial1 Initialization */
+  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 10
+  modbus.begin(slaveId_tm100, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  while (1)
+  {
+    if (allowsModbusTask_Sensor_tm100) // loop에서 허용해줌
+    {
+      // TM-100
+      modbus_Sensor_result = modbus.readInputRegisters(0, 3); // 0x04
+
+      if (modbus_Sensor_result == modbus.ku8MBSuccess)
+      {
+        temp = float(modbus.getResponseBuffer(0) / 10.00F);
+        humi = float(modbus.getResponseBuffer(1) / 10.00F);
+        errBit = modbus.getResponseBuffer(2);
+
+        // Get response data from sensor
+        // allowsModbusTask_Sensor_tm100 = false;
+
+        allowsPublishTEMP = true;
+        allowsPublishHUMI = true;
+        publishSensorData();
+      }
+      // 오류 처리
+      else
+      {
+        // loop()에서 modbus_Sensor_result switch로 조건별 출력
+      }
+      allowsModbusTask_Sensor_tm100 = false;
+    }
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+// 감우 센서 task
+void ModbusTask_Sensor_rain(void *pvParameters)
+{
+  HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
+
+  /* Serial1 Initialization */
+  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 2
+  modbus.begin(slaveId_rain, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  while (1)
+  {
+    if (allowsModbusTask_Sensor_rain) // loop에서 허용해줌
+    {
+      // CNT-WJ24
+      modbus_Sensor_result = modbus.readInputRegisters(0x64, 3); // 0x04
+
+      if (modbus_Sensor_result == modbus.ku8MBSuccess)
+      {
+        int rainDetectBit = modbus.getResponseBuffer(2);
+        // 각 판의 비 감지 상태
+        bool plate1Detected = rainDetectBit & (1 << 7);
+        bool plate2Detected = rainDetectBit & (1 << 8);
+        bool plate3Detected = rainDetectBit & (1 << 9);
+
+        // 최소 두 개의 감지판에서 비가 감지되는지 확인
+        int detectedCount = plate1Detected + plate2Detected + plate3Detected;
+        if (detectedCount >= 2)
+        {
+          isRainy = true; // 비 감지됨
+        }
+        else
+        {
+          isRainy = false; // 비 미감지
+        }
+
+        // Get response data from sensor
+        // allowsModbusTask_Sensor_rain = false;
+
+        allowsPublishRAIN;
+        publishSensorData();
+      }
+      // 오류 처리
+      else
+      {
+        // loop()에서 modbus_Sensor_result switch로 조건별 출력
+      }
+      allowsModbusTask_Sensor_rain = false;
+    }
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+void ModbusTask_Sensor_ec(void *pvParameters) {}   // 지온·지습·EC 센서 task
+void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
 
 void preTransmission()
 {
@@ -733,12 +856,13 @@ void publishSensorData()
   // 온도
   if (allowsPublishTEMP)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp").c_str(), String(temp).c_str()); // 릴레이 동작 후 완료 메시지 publish
-    DebugSerial.print("Publish: [");
-    DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp");
-    DebugSerial.println("] ");
-    DebugSerial.print(temp);
-    DebugSerial.println("℃");
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/temp").c_str(), String(temp).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(temp);
+    // DebugSerial.println("℃");
 
     allowsPublishTEMP = false;
   }
@@ -746,14 +870,56 @@ void publishSensorData()
   // 습도
   if (allowsPublishHUMI)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi").c_str(), String(humi).c_str()); // 릴레이 동작 후 완료 메시지 publish
-    DebugSerial.print("Publish: [");
-    DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi");
-    DebugSerial.println("] ");
-    DebugSerial.print(humi);
-    DebugSerial.println("%");
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/humi").c_str(), String(humi).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(humi);
+    // DebugSerial.println("%");
 
     allowsPublishHUMI = false;
+  }
+
+  // 감우
+  if (allowsPublishRAIN)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? "비" : "X").c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "rain");
+    // DebugSerial.println("] ");
+    // DebugSerial.println(isRainy ? "비" : "X");
+
+    allowsPublishRAIN = false;
+  }
+
+  // EC
+  if (allowsPublishEC)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/ec").c_str(), String(ec).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "ec");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(ec);
+    // DebugSerial.println("mS/cm");
+
+    allowsPublishEC = false;
+  }
+
+  // 수분장력
+  if (allowsPublishSoilP)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/soilPotential").c_str(), String(soilPotential).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "soilPotential");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(soilPotential);
+    // DebugSerial.println("kPa");
+
+    allowsPublishSoilP = false;
   }
 }
 
@@ -914,9 +1080,40 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
   }
 }
 
+void checkModbusErrorStatus()
+{
+  if (modbus_Sensor_result != 0)
+  {
+    // 오류 상태에 따른 처리
+    switch (modbus_Sensor_result)
+    {
+    case 0x01:
+      DebugSerial.println("Illegal function.");
+      break;
+    case 0x02:
+      DebugSerial.println("Illegal function.");
+      break;
+    case 0x03:
+      DebugSerial.println("Illegal data value.");
+      break;
+    case 0x04:
+      DebugSerial.println("Slave device failure.");
+      break;
+    default:
+      // 알 수 없는 오류 처리 코드
+      DebugSerial.print("Unknown error: ");
+      DebugSerial.println(modbus_Sensor_result);
+      break;
+    }
+
+    // 오류 처리 후 상태 초기화
+    modbus_Sensor_result = -1;
+  }
+}
+
 bool isWMConfigDefined()
 {
-  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || sensorId_01 == "" || slaveId_01 == "" || sensorId_02 == "" || slaveId_02 == "" || relayId == "" || slaveId_relay == "")
+  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || sensorId_01 == "sensorId_none" || slaveId_01 == "" || relayId == "" || slaveId_relay == "")
   {
     Serial.println("Undefined Form Submitted...");
     return false;
@@ -934,6 +1131,7 @@ void setup()
 
   // File System Setup
   initSPIFFS();
+  Serial.println("SPIFFS Done");
 
   // Load values saved in SPIFFS
   mqttUsername = readFile(SPIFFS, mqttUsernamePath);
@@ -1287,18 +1485,71 @@ void loop()
   currentMillis = millis();
   if (currentMillis - previousMillis > SENSING_PERIOD * PERIOD_CONSTANT)
   {
+    previousMillis = currentMillis;
+
+    // 온습도 센서 활성화
     if (isSelectedModbusTask_Sensor_th)
     {
       allowsModbusTask_Sensor_th = true; // 센서 task 활성화: 센서정보 수집
 
-      while (allowsModbusTask_Sensor_th) // 수집완료까지 대기, 완료되면 publish로
+      while (allowsModbusTask_Sensor_th) // 수집완료 + publish까지 대기
       {
         delay(1);
       }
-      allowsPublishTEMP = true;
-      allowsPublishHUMI = true;
-      publishSensorData();
+      checkModbusErrorStatus();
     }
-    previousMillis = currentMillis;
+
+    // TM-100 센서 활성화
+    if (isSelectedModbusTask_Sensor_tm100)
+    {
+      allowsModbusTask_Sensor_tm100 = true; // 센서 task 활성화: 센서정보 수집
+
+      while (allowsModbusTask_Sensor_tm100) // 수집완료 + publish까지 대기
+      {
+        delay(1);
+      }
+      checkModbusErrorStatus();
+
+      if (errBit)
+      {
+        DebugSerial.println("Sensor Open ERROR!!!");
+      }
+    }
+
+    // 감우 센서 활성화
+    if (isSelectedModbusTask_Sensor_rain)
+    {
+      allowsModbusTask_Sensor_rain = true; // 센서 task 활성화: 센서정보 수집
+
+      while (allowsModbusTask_Sensor_rain) // 수집완료 + publish까지 대기
+      {
+        delay(1);
+      }
+      checkModbusErrorStatus();
+    }
+
+    // EC 센서 활성화
+    if (isSelectedModbusTask_Sensor_ec)
+    {
+      allowsModbusTask_Sensor_ec = true; // 센서 task 활성화: 센서정보 수집
+
+      while (allowsModbusTask_Sensor_ec) // 수집완료 + publish까지 대기
+      {
+        delay(1);
+      }
+      checkModbusErrorStatus();
+    }
+
+    // 수분장력 센서 활성화
+    // if (isSelectedModbusTask_Sensor_soil)
+    // {
+    //   allowsModbusTask_Sensor_soil = true; // 센서 task 활성화: 센서정보 수집
+
+    //   while (allowsModbusTask_Sensor_soil) // 수집완료 + publish까지 대기
+    //   {
+    //     delay(1);
+    //   }
+    //   checkModbusErrorStatus();
+    // }
   }
 }
