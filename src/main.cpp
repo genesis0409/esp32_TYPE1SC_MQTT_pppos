@@ -9,7 +9,7 @@
 #include "soc/rtc_cntl_reg.h" // Disable brownout problems
 #include "driver/rtc_io.h"
 
-#include "SPIFFS.h"
+#include "LittleFS.h"
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 
@@ -73,9 +73,9 @@ const char *slaveId_relayPath = "/slaveId_relay.txt";
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
 
-void initSPIFFS();                                                 // Initialize SPIFFS
-String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
-void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
+void initLittleFS();                                                 // Initialize LittleFS
+String readFile(fs::FS &fs, const char *path);                     // Read File from LittleFS
+void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to LittleFS
 bool isWMConfigDefined();                                          // Is Wifi Manager Configuration Defiend?
 bool allowsLoop = false;
 
@@ -1028,17 +1028,17 @@ const char *getStatus(int value)
   return (value == 1) ? "on" : "off";
 }
 
-// Initialize SPIFFS
-void initSPIFFS()
+//Initialize LittleFS
+void initLittleFS()
 {
-  if (!SPIFFS.begin(true))
+  if (!LittleFS.begin())
   {
-    Serial.println("An error has occurred while mounting SPIFFS");
+    Serial.println("An Error has occurred while mounting LittleFS");
+    return;
   }
-  Serial.println("SPIFFS mounted successfully");
 }
 
-// Read File from SPIFFS
+// Read File from LittleFS
 String readFile(fs::FS &fs, const char *path)
 {
   Serial.printf("Reading file: %s\r\n", path);
@@ -1059,7 +1059,7 @@ String readFile(fs::FS &fs, const char *path)
   return fileContent;
 }
 
-// Write file to SPIFFS
+// Write file to LittleFS
 void writeFile(fs::FS &fs, const char *path, const char *message)
 {
   Serial.printf("Writing file: %s\r\n", path);
@@ -1130,41 +1130,41 @@ void setup()
   DebugSerial.begin(SERIAL_BR);
 
   // File System Setup
-  initSPIFFS();
-  Serial.println("SPIFFS Done");
+  initLittleFS();
+  Serial.println("LittleFS Done");
 
-  // Load values saved in SPIFFS
-  mqttUsername = readFile(SPIFFS, mqttUsernamePath);
-  mqttPw = readFile(SPIFFS, mqttPwPath);
-  hostId = readFile(SPIFFS, hostIdPath);
-  port = readFile(SPIFFS, portPath);
-  sensorId_01 = readFile(SPIFFS, sensorId_01Path);
-  slaveId_01 = readFile(SPIFFS, slaveId_01Path);
-  sensorId_02 = readFile(SPIFFS, sensorId_02Path);
-  slaveId_02 = readFile(SPIFFS, slaveId_02Path);
-  relayId = readFile(SPIFFS, relayIdPath);
-  slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
+  // Load values saved in LittleFS
+  mqttUsername = readFile(LittleFS, mqttUsernamePath);
+  mqttPw = readFile(LittleFS, mqttPwPath);
+  hostId = readFile(LittleFS, hostIdPath);
+  port = readFile(LittleFS, portPath);
+  sensorId_01 = readFile(LittleFS, sensorId_01Path);
+  slaveId_01 = readFile(LittleFS, slaveId_01Path);
+  sensorId_02 = readFile(LittleFS, sensorId_02Path);
+  slaveId_02 = readFile(LittleFS, slaveId_02Path);
+  relayId = readFile(LittleFS, relayIdPath);
+  slaveId_relay = readFile(LittleFS, slaveId_relayPath);
 
   // Debug Print
-  DebugSerial.print("mqttUsername in SPIFFS: ");
+  DebugSerial.print("mqttUsername in LittleFS: ");
   DebugSerial.println(mqttUsername);
-  DebugSerial.print("mqttPw in SPIFFS: ");
+  DebugSerial.print("mqttPw in LittleFS: ");
   DebugSerial.println(mqttPw.length() == 0 ? "NO password." : "Password exists.");
-  DebugSerial.print("hostId in SPIFFS: ");
+  DebugSerial.print("hostId in LittleFS: ");
   DebugSerial.println(hostId);
-  DebugSerial.print("port in SPIFFS: ");
+  DebugSerial.print("port in LittleFS: ");
   DebugSerial.println(port);
-  DebugSerial.print("sensorId_01 in SPIFFS: ");
+  DebugSerial.print("sensorId_01 in LittleFS: ");
   DebugSerial.println(sensorId_01);
-  DebugSerial.print("slaveId_01 in SPIFFS: ");
+  DebugSerial.print("slaveId_01 in LittleFS: ");
   DebugSerial.println(slaveId_01);
-  DebugSerial.print("sensorId_02 in SPIFFS: ");
+  DebugSerial.print("sensorId_02 in LittleFS: ");
   DebugSerial.println(sensorId_02);
-  DebugSerial.print("slaveId_02 in SPIFFS: ");
+  DebugSerial.print("slaveId_02 in LittleFS: ");
   DebugSerial.println(slaveId_02);
-  DebugSerial.print("relayId in SPIFFS: ");
+  DebugSerial.print("relayId in LittleFS: ");
   DebugSerial.println(relayId);
-  DebugSerial.print("slaveId_relay in SPIFFS: ");
+  DebugSerial.print("slaveId_relay in LittleFS: ");
   DebugSerial.println(slaveId_relay);
 
   DebugSerial.println();
@@ -1184,9 +1184,9 @@ void setup()
     // Web Server Root URL
     // GET방식
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(SPIFFS, "/wifimanager.html", "text/html"); });
+              { request->send(LittleFS, "/wifimanager.html", "text/html"); });
 
-    server.serveStatic("/", SPIFFS, "/");
+    server.serveStatic("/", LittleFS, "/");
     // POST방식
     server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
               {
@@ -1200,7 +1200,7 @@ void setup()
             Serial.print("mqttUsername set to: ");
             Serial.println(mqttUsername);
             // Write file to save value
-            writeFile(SPIFFS, mqttUsernamePath, mqttUsername.c_str());
+            writeFile(LittleFS, mqttUsernamePath, mqttUsername.c_str());
           }
           // HTTP POST mqttPw value
           if (p->name() == PARAM_INPUT_2)
@@ -1209,7 +1209,7 @@ void setup()
             Serial.print("mqttPw set to: ");
             Serial.println(mqttPw);
             // Write file to save value
-            writeFile(SPIFFS, mqttPwPath, mqttPw.c_str());
+            writeFile(LittleFS, mqttPwPath, mqttPw.c_str());
           }
           // HTTP POST hostId value
           if (p->name() == PARAM_INPUT_3)
@@ -1218,7 +1218,7 @@ void setup()
             Serial.print("hostId set to: ");
             Serial.println(hostId);
             // Write file to save value
-            writeFile(SPIFFS, hostIdPath, hostId.c_str());
+            writeFile(LittleFS, hostIdPath, hostId.c_str());
           }
           // HTTP POST port value
           if (p->name() == PARAM_INPUT_4)
@@ -1227,7 +1227,7 @@ void setup()
             Serial.print("port set to: ");
             Serial.println(port);
             // Write file to save value
-            writeFile(SPIFFS, portPath, port.c_str());
+            writeFile(LittleFS, portPath, port.c_str());
           }
           // HTTP POST sensorId_01 value
           if (p->name() == PARAM_INPUT_5)
@@ -1236,7 +1236,7 @@ void setup()
             Serial.print("sensorId_01 set to: ");
             Serial.println(sensorId_01);
             // Write file to save value
-            writeFile(SPIFFS, sensorId_01Path, sensorId_01.c_str());
+            writeFile(LittleFS, sensorId_01Path, sensorId_01.c_str());
           }
           // HTTP POST slaveId_01 value
           if (p->name() == PARAM_INPUT_6)
@@ -1245,7 +1245,7 @@ void setup()
             Serial.print("slaveId_01 set to: ");
             Serial.println(slaveId_01);
             // Write file to save value
-            writeFile(SPIFFS, slaveId_01Path, slaveId_01.c_str());
+            writeFile(LittleFS, slaveId_01Path, slaveId_01.c_str());
           }
           // HTTP POST sensorId_02 value
           if (p->name() == PARAM_INPUT_7)
@@ -1254,7 +1254,7 @@ void setup()
             Serial.print("sensorId_02 set to: ");
             Serial.println(sensorId_02);
             // Write file to save value
-            writeFile(SPIFFS, sensorId_02Path, sensorId_02.c_str());
+            writeFile(LittleFS, sensorId_02Path, sensorId_02.c_str());
           }
           // HTTP POST slaveId_02 value
           if (p->name() == PARAM_INPUT_8)
@@ -1263,7 +1263,7 @@ void setup()
             Serial.print("slaveId_02 set to: ");
             Serial.println(slaveId_02);
             // Write file to save value
-            writeFile(SPIFFS, slaveId_02Path, slaveId_02.c_str());
+            writeFile(LittleFS, slaveId_02Path, slaveId_02.c_str());
           }
           // HTTP POST relayId value
           if (p->name() == PARAM_INPUT_9)
@@ -1272,7 +1272,7 @@ void setup()
             Serial.print("relayId set to: ");
             Serial.println(relayId);
             // Write file to save value
-            writeFile(SPIFFS, relayIdPath, relayId.c_str());
+            writeFile(LittleFS, relayIdPath, relayId.c_str());
           }
           // HTTP POST slaveId_relay value
           if (p->name() == PARAM_INPUT_10)
@@ -1281,7 +1281,7 @@ void setup()
             Serial.print("slaveId_relay set to: ");
             Serial.println(slaveId_relay);
             // Write file to save value
-            writeFile(SPIFFS, slaveId_relayPath, slaveId_relay.c_str());
+            writeFile(LittleFS, slaveId_relayPath, slaveId_relay.c_str());
           }
           Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
