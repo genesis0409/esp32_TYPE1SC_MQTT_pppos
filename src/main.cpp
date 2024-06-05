@@ -728,7 +728,7 @@ void callback(char *topic, byte *payload, unsigned int length)
       delay(1);
     }
     // topic: "type1sc/update/farmtalkSwitch00
-    client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), std::to_string(readingStatusRegister[0]).c_str());
+    client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
   }
 
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
@@ -1113,7 +1113,7 @@ void checkModbusErrorStatus()
 
 bool isWMConfigDefined()
 {
-  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || sensorId_01 == "sensorId_none" || slaveId_01 == "" || relayId == "" || slaveId_relay == "")
+  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || relayId == "" || slaveId_relay == "")
   {
     Serial.println("Undefined Form Submitted...");
     return false;
@@ -1175,7 +1175,7 @@ void setup()
     // Connect to Wi-Fi network with SSID and pass
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("FarmtalkSwitch-Manager-01", NULL);
+    WiFi.softAP("FarmtalkSwitch01-Manager", NULL);
 
     IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
     Serial.print("AP IP address: ");
