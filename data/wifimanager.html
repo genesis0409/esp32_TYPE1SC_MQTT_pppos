@@ -53,7 +53,7 @@
                 type="text"
                 id="hostId"
                 name="hostId"
-                value="ea7ace00bfe74a59b7f420f5d3c4745f.s1.eu.hivemq.cloud"
+                value="broker.hivemq.com"
                 aria-required="true"
               />
               <br />
@@ -62,7 +62,7 @@
                 type="number"
                 id="port"
                 name="port"
-                value="8883"
+                value="1883"
                 aria-required="true"
               /><br />
               <br />
@@ -76,13 +76,13 @@
                 <!-- <option disabled selected value>==== 선택 ====</option> -->
                 <!-- <option value="">=== 선택 ===</option> -->
                 <option value="sensorId_none">선택하지 않음</option>
-                <option id="boundaryLine" disabled>-------------------------------</option>
+                <option id="boundaryLine" disabled>
+                  -------------------------------
+                </option>
                 <option value="sensorId_th">온습도 센서</option>
                 <option value="sensorId_tm100">TM-100</option>
                 <option value="sensorId_rain">감우 센서</option>
-                <option value="sensorId_ec" disabled>
-                  지온·지습·EC 센서
-                </option>
+                <option value="sensorId_ec" disabled>지온·지습·EC 센서</option>
                 <option value="sensorId_soil" disabled>수분장력 센서</option>
               </select>
               <br />
@@ -94,6 +94,7 @@
                 aria-required="true"
               />
 
+              <!--
               <hr class="hr-text" data-content="">
 
               <label for="sensorId_02_short">Sensor 02</label>
@@ -102,8 +103,7 @@
                 name="sensorId_02"
                 class="comboBox"
               >
-                <!-- <option disabled selected value>==== 선택 ====</option> -->
-                <!-- <option value="">=== 선택 ===</option> -->
+                
                 <option value="sensorId_none">선택하지 않음</option>
                 <option id="boundaryLine" disabled>-------------------------------</option>
                 <option value="sensorId_th">온습도 센서</option>
@@ -122,6 +122,7 @@
                 name="slaveId_02"
                 aria-required="true"
               />
+              -->
 
               <hr class="hr-text" data-content="">
 
