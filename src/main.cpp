@@ -923,6 +923,40 @@ void publishSensorData()
   }
 }
 
+void publishSensorResult()
+{
+  if (allowsPublishSensor_result_th)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
+    allowsPublishSensor_result_th = false;
+    modbus_Sensor_result_th = -1;
+  }
+  if (allowsPublishSensor_result_tm100)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
+    allowsPublishSensor_result_tm100 = false;
+    modbus_Sensor_result_tm100 = -1;
+  }
+  if (allowsPublishSensor_result_rain)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
+    allowsPublishSensor_result_rain = false;
+    modbus_Sensor_result_rain = -1;
+  }
+  if (allowsPublishSensor_result_ec)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
+    allowsPublishSensor_result_ec = false;
+    modbus_Sensor_result_ec = -1;
+  }
+  if (allowsPublishSensor_result_soil)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
+    allowsPublishSensor_result_soil = false;
+    modbus_Sensor_result_soil = -1;
+  }
+}
+
 // 문자열 분할 함수 Split
 String *Split(String sData, char cSeparator, int *scnt)
 {
