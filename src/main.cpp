@@ -164,7 +164,7 @@ void extAntenna()
 }
 
 // RS485 setting **********************************************************************************
-#define SLAVE_ID 5
+// #define SLAVE_ID 5
 #define WRITE_START_ADDRESS 3
 #define WRITE_QUANTITY 4
 
@@ -180,9 +180,13 @@ const uint8_t dePin = 13; // DE
 const uint8_t rePin = 14; // RE
 
 uint8_t modbus_Relay_result;
-uint8_t modbus_Sensor_result;
+uint8_t modbus_Sensor_result_th;
+uint8_t modbus_Sensor_result_tm100;
+uint8_t modbus_Sensor_result_rain;
+uint8_t modbus_Sensor_result_ec;
+uint8_t modbus_Sensor_result_soil;
 
-void checkModbusErrorStatus();
+// void checkModbusErrorStatus();
 
 uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 uint16_t readingRegister[3] = {0, 0, 0};                     // 온습도, 감우, ec 등 읽기용
@@ -195,18 +199,18 @@ bool allowsModbusTask_Relay = false;
 // bool allowsModbusTask_Sensor = false;
 
 // 선택한 센서의 task를 실행여부 결정
-bool allowsModbusTask_Sensor_th = false;
-bool allowsModbusTask_Sensor_tm100 = false;
-bool allowsModbusTask_Sensor_rain = false;
-bool allowsModbusTask_Sensor_ec = false;
-bool allowsModbusTask_Sensor_soil = false;
+// bool allowsModbusTask_Sensor_th = false;
+// bool allowsModbusTask_Sensor_tm100 = false;
+// bool allowsModbusTask_Sensor_rain = false;
+// bool allowsModbusTask_Sensor_ec = false;
+// bool allowsModbusTask_Sensor_soil = false;
 
 // 선택한 센서의 task가 선택되었는지 여부 - 한번 선택되면 불변해야함
-bool isSelectedModbusTask_Sensor_th = false;
-bool isSelectedModbusTask_Sensor_tm100 = false;
-bool isSelectedModbusTask_Sensor_rain = false;
-bool isSelectedModbusTask_Sensor_ec = false;
-bool isSelectedModbusTask_Sensor_soil = false;
+// bool isSelectedModbusTask_Sensor_th = false;
+// bool isSelectedModbusTask_Sensor_tm100 = false;
+// bool isSelectedModbusTask_Sensor_rain = false;
+// bool isSelectedModbusTask_Sensor_ec = false;
+// bool isSelectedModbusTask_Sensor_soil = false;
 
 // 각 node task
 void ModbusTask_Relay(void *pvParameters);        // Task에 등록할 modbus relay 제어
@@ -1468,13 +1472,17 @@ void setup()
     {
       if (sensorId_01 == "sensorId_th")
         slaveId_th = slaveId_01.toInt();
+
       else if (sensorId_02 == "sensorId_th")
         slaveId_th = slaveId_02.toInt();
 
-      allowsModbusTask_Sensor_th = true;
-      isSelectedModbusTask_Sensor_th = true;
+      // DebugSerial.print("slaveId_th: ");
+      // DebugSerial.println(slaveId_th);
 
-      xTaskCreate(&ModbusTask_Sensor_th, "ModbusTask_Sensor_th", 2048, NULL, 6, NULL);
+      // allowsModbusTask_Sensor_th = true;
+      // isSelectedModbusTask_Sensor_th = true;
+
+      xTaskCreate(&ModbusTask_Sensor_th, "ModbusTask_th", 2048, NULL, 6, NULL);
     }
 
     // TM100 센서 task 생성 및 등록 (우선순위: 6)
@@ -1482,13 +1490,17 @@ void setup()
     {
       if (sensorId_01 == "sensorId_tm100")
         slaveId_tm100 = slaveId_01.toInt();
+
       else if (sensorId_02 == "sensorId_tm100")
         slaveId_tm100 = slaveId_02.toInt();
 
-      allowsModbusTask_Sensor_tm100 = true;
-      isSelectedModbusTask_Sensor_tm100 = true;
+      // DebugSerial.print("slaveId_tm100: ");
+      // DebugSerial.println(slaveId_tm100);
 
-      xTaskCreate(&ModbusTask_Sensor_tm100, "ModbusTask_Sensor_tm100", 2048, NULL, 6, NULL);
+      // allowsModbusTask_Sensor_tm100 = true;
+      // isSelectedModbusTask_Sensor_tm100 = true;
+
+      xTaskCreate(&ModbusTask_Sensor_tm100, "ModbusTask_tm100", 2048, NULL, 6, NULL);
     }
 
     // 감우 센서 task 생성 및 등록 (우선순위: 6)
@@ -1496,13 +1508,17 @@ void setup()
     {
       if (sensorId_01 == "sensorId_rain")
         slaveId_rain = slaveId_01.toInt();
+
       else if (sensorId_02 == "sensorId_rain")
         slaveId_rain = slaveId_02.toInt();
 
-      allowsModbusTask_Sensor_rain = true;
-      isSelectedModbusTask_Sensor_rain = true;
+      // DebugSerial.print("slaveId_rain: ");
+      // DebugSerial.println(slaveId_rain);
 
-      xTaskCreate(&ModbusTask_Sensor_rain, "ModbusTask_Sensor_rain", 2048, NULL, 6, NULL);
+      // allowsModbusTask_Sensor_rain = true;
+      // isSelectedModbusTask_Sensor_rain = true;
+
+      xTaskCreate(&ModbusTask_Sensor_rain, "ModbusTask_rain", 2048, NULL, 6, NULL);
     }
 
     // 지온·지습·EC 센서 task 생성 및 등록 (우선순위: 6)
@@ -1510,13 +1526,17 @@ void setup()
     {
       if (sensorId_01 == "sensorId_ec")
         slaveId_ec = slaveId_01.toInt();
+
       else if (sensorId_02 == "sensorId_ec")
         slaveId_ec = slaveId_02.toInt();
 
-      allowsModbusTask_Sensor_ec = true;
-      isSelectedModbusTask_Sensor_ec = true;
+      // DebugSerial.print("slaveId_ec: ");
+      // DebugSerial.println(slaveId_ec);
 
-      xTaskCreate(&ModbusTask_Sensor_ec, "ModbusTask_Sensor_ec", 2048, NULL, 6, NULL);
+      // allowsModbusTask_Sensor_ec = true;
+      // isSelectedModbusTask_Sensor_ec = true;
+
+      xTaskCreate(&ModbusTask_Sensor_ec, "ModbusTask_ec", 2048, NULL, 6, NULL);
     }
 
     // 수분장력 센서 task 생성 및 등록 (우선순위: 6)
@@ -1524,13 +1544,17 @@ void setup()
     {
       if (sensorId_01 == "sensorId_soil")
         slaveId_soil = slaveId_01.toInt();
+
       else if (sensorId_02 == "sensorId_soil")
         slaveId_soil = slaveId_02.toInt();
 
-      allowsModbusTask_Sensor_soil = true;
-      isSelectedModbusTask_Sensor_soil = true;
+      // DebugSerial.print("slaveId_soil: ");
+      // DebugSerial.println(slaveId_soil);
 
-      xTaskCreate(&ModbusTask_Sensor_soil, "ModbusTask_Sensor_soil", 2048, NULL, 6, NULL);
+      // allowsModbusTask_Sensor_soil = true;
+      // isSelectedModbusTask_Sensor_soil = true;
+
+      xTaskCreate(&ModbusTask_Sensor_soil, "ModbusTask_soil", 2048, NULL, 6, NULL);
     }
   }
 }
@@ -1546,75 +1570,74 @@ void loop()
     client.loop();
   }
 
-  //
-  currentMillis = millis();
-  if (currentMillis - previousMillis > SENSING_PERIOD * PERIOD_CONSTANT)
-  {
-    previousMillis = currentMillis;
+  // currentMillis = millis();
+  // if (currentMillis - previousMillis > SENSING_PERIOD_SEC * PERIOD_CONSTANT)
+  // {
+  //   previousMillis = currentMillis;
 
-    // 온습도 센서 활성화
-    if (isSelectedModbusTask_Sensor_th)
-    {
-      allowsModbusTask_Sensor_th = true; // 센서 task 활성화: 센서정보 수집
+  //   // 온습도 센서 활성화
+  //   if (isSelectedModbusTask_Sensor_th)
+  //   {
+  //     allowsModbusTask_Sensor_th = true; // 센서 task 활성화: 센서정보 수집
 
-      while (allowsModbusTask_Sensor_th) // 수집완료 + publish까지 대기
-      {
-        delay(1);
-      }
-      checkModbusErrorStatus();
-    }
+  //     while (allowsModbusTask_Sensor_th) // 수집완료 + publish까지 대기
+  //     {
+  //       delay(1);
+  //     }
+  //     checkModbusErrorStatus();
+  //   }
 
-    // TM-100 센서 활성화
-    if (isSelectedModbusTask_Sensor_tm100)
-    {
-      allowsModbusTask_Sensor_tm100 = true; // 센서 task 활성화: 센서정보 수집
+  //   // TM-100 센서 활성화
+  //   if (isSelectedModbusTask_Sensor_tm100)
+  //   {
+  //     allowsModbusTask_Sensor_tm100 = true; // 센서 task 활성화: 센서정보 수집
 
-      while (allowsModbusTask_Sensor_tm100) // 수집완료 + publish까지 대기
-      {
-        delay(1);
-      }
-      checkModbusErrorStatus();
+  //     while (allowsModbusTask_Sensor_tm100) // 수집완료 + publish까지 대기
+  //     {
+  //       delay(1);
+  //     }
+  //     checkModbusErrorStatus();
 
-      if (errBit)
-      {
-        DebugSerial.println("Sensor Open ERROR!!!");
-      }
-    }
+  //     if (errBit)
+  //     {
+  //       DebugSerial.println("Sensor Open ERROR!!!");
+  //     }
+  //   }
 
-    // 감우 센서 활성화
-    if (isSelectedModbusTask_Sensor_rain)
-    {
-      allowsModbusTask_Sensor_rain = true; // 센서 task 활성화: 센서정보 수집
+  //   // 감우 센서 활성화
+  //   if (isSelectedModbusTask_Sensor_rain)
+  //   {
+  //     allowsModbusTask_Sensor_rain = true; // 센서 task 활성화: 센서정보 수집
 
-      while (allowsModbusTask_Sensor_rain) // 수집완료 + publish까지 대기
-      {
-        delay(1);
-      }
-      checkModbusErrorStatus();
-    }
+  //     while (allowsModbusTask_Sensor_rain) // 수집완료 + publish까지 대기
+  //     {
+  //       delay(1);
+  //     }
+  //     checkModbusErrorStatus();
+  //   }
 
-    // EC 센서 활성화
-    if (isSelectedModbusTask_Sensor_ec)
-    {
-      allowsModbusTask_Sensor_ec = true; // 센서 task 활성화: 센서정보 수집
+  //   // EC 센서 활성화
+  //   if (isSelectedModbusTask_Sensor_ec)
+  //   {
+  //     allowsModbusTask_Sensor_ec = true; // 센서 task 활성화: 센서정보 수집
 
-      while (allowsModbusTask_Sensor_ec) // 수집완료 + publish까지 대기
-      {
-        delay(1);
-      }
-      checkModbusErrorStatus();
-    }
+  //     while (allowsModbusTask_Sensor_ec) // 수집완료 + publish까지 대기
+  //     {
+  //       delay(1);
+  //     }
+  //     checkModbusErrorStatus();
+  //   }
 
-    // 수분장력 센서 활성화
-    // if (isSelectedModbusTask_Sensor_soil)
-    // {
-    //   allowsModbusTask_Sensor_soil = true; // 센서 task 활성화: 센서정보 수집
+  //   // 수분장력 센서 활성화
+  //   // if (isSelectedModbusTask_Sensor_soil)
+  //   // {
+  //   //   allowsModbusTask_Sensor_soil = true; // 센서 task 활성화: 센서정보 수집
 
-    //   while (allowsModbusTask_Sensor_soil) // 수집완료 + publish까지 대기
-    //   {
-    //     delay(1);
-    //   }
-    //   checkModbusErrorStatus();
-    // }
-  }
+  //   //   while (allowsModbusTask_Sensor_soil) // 수집완료 + publish까지 대기
+  //   //   {
+  //   //     delay(1);
+  //   //   }
+  //   //   checkModbusErrorStatus();
+  //   // }
+  // }
 }
