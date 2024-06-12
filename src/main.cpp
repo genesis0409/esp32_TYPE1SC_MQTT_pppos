@@ -1115,36 +1115,36 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
   }
 }
 
-void checkModbusErrorStatus()
-{
-  if (modbus_Sensor_result != 0)
-  {
-    // 오류 상태에 따른 처리
-    switch (modbus_Sensor_result)
-    {
-    case 0x01:
-      DebugSerial.println("Illegal function.");
-      break;
-    case 0x02:
-      DebugSerial.println("Illegal function.");
-      break;
-    case 0x03:
-      DebugSerial.println("Illegal data value.");
-      break;
-    case 0x04:
-      DebugSerial.println("Slave device failure.");
-      break;
-    default:
-      // 알 수 없는 오류 처리 코드
-      DebugSerial.print("Unknown error: ");
-      DebugSerial.println(modbus_Sensor_result);
-      break;
-    }
+// void checkModbusErrorStatus()
+// {
+//   if (modbus_Sensor_result != 0)
+//   {
+//     // 오류 상태에 따른 처리
+//     switch (modbus_Sensor_result)
+//     {
+//     case 0x01:
+//       DebugSerial.println("Illegal function.");
+//       break;
+//     case 0x02:
+//       DebugSerial.println("Illegal function.");
+//       break;
+//     case 0x03:
+//       DebugSerial.println("Illegal data value.");
+//       break;
+//     case 0x04:
+//       DebugSerial.println("Slave device failure.");
+//       break;
+//     default:
+//       // 알 수 없는 오류 처리 코드
+//       DebugSerial.print("Unknown error: ");
+//       DebugSerial.println(modbus_Sensor_result);
+//       break;
+//     }
 
-    // 오류 처리 후 상태 초기화
-    modbus_Sensor_result = -1;
-  }
-}
+//     // 오류 처리 후 상태 초기화
+//     modbus_Sensor_result = -1;
+//   }
+// }
 
 bool isWMConfigDefined()
 {
