@@ -16,6 +16,7 @@
 #include <ModbusMaster.h>
 
 #define DebugSerial Serial
+HardwareSerial SerialPort(1); // use ESP32 UART1
 #define M1Serial Serial2
 
 #define SERIAL_BR 115200
@@ -92,6 +93,12 @@ bool allowsPublishEC = false;
 bool allowsPublishRAIN = false;
 bool allowsPublishSoilP = false;
 
+bool allowsPublishSensor_result_th = false;
+bool allowsPublishSensor_result_tm100 = false;
+bool allowsPublishSensor_result_rain = false;
+bool allowsPublishSensor_result_ec = false;
+bool allowsPublishSensor_result_soil = false;
+
 // PPPOS, MQTT settings ***************************************************************************
 char *ppp_user = "daonTest01";
 char *ppp_pass = "daon7521";
@@ -104,7 +111,7 @@ PubSubClient client(ppposClient);
 bool atMode = true;
 
 // Set SENSING_PERIOD *****************************************************************************
-#define SENSING_PERIOD 600 // 10 min
+#define SENSING_PERIOD_SEC 600 // 10 min
 #define PERIOD_CONSTANT 1000
 // ************************************************************************************************
 
@@ -140,6 +147,7 @@ char *suffix = "";         // 추가할 문자열을 설정
 
 void publishNewTopic();
 void publishSensorData();
+void publishSensorResult();
 
 String *Split(String sData, char cSeparator, int *scnt); // 문자열 파싱
 String *rStr = nullptr;                                  // 파싱된 문자열 저장변수
@@ -190,7 +198,7 @@ uint8_t modbus_Sensor_result_soil;
 
 uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0}; // 각 2바이트; {타입, pw, 제어idx, 시간}
 uint16_t readingRegister[3] = {0, 0, 0};                     // 온습도, 감우, ec 등 읽기용
-uint16_t readingStatusRegister[1] = {0};                     // refresh 토픽: 상태 반환용
+uint16_t readingStatusRegister[1] = {0};                     // refresh 메시지: 상태 반환용
 
 uint8_t index_relay; // r1~r8: 0~7
 
@@ -227,6 +235,7 @@ int slaveId_rain;
 int slaveId_ec;
 int slaveId_soil;
 
+// 사용 안함
 struct SensorTask
 {
   const char *sensorId;         // sensorId: 센서 ID 문자열.
@@ -266,13 +275,22 @@ void createSensorTask(const char *sensorId_01, int INT_slaveId_01, const char *s
 // pppos client task보다 우선하는 modbus task
 void ModbusTask_Relay(void *pvParameters)
 {
-  HardwareSerial SerialPort(1); // use ESP32 UART1
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Relay_result = modbus.ku8MBInvalidCRC;
 
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
   /* Serial1 Initialization */
-  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
   // Modbus slave ID 5
   modbus.begin(relayId.toInt(), SerialPort);
 
@@ -286,7 +304,7 @@ void ModbusTask_Relay(void *pvParameters)
   {
     if (allowsModbusTask_Relay) // callback에서 허용해줌
     {
-      // refresh 토픽일 경우 릴레이 상태 업데이트
+      // refresh 메시지일 경우 릴레이 상태 업데이트
       if (rStr[0] == "refresh")
       {
         // relay status
@@ -373,13 +391,22 @@ void ModbusTask_Relay(void *pvParameters)
 // 온습도 센서 task
 void ModbusTask_Sensor_th(void *pvParameters)
 {
-  HardwareSerial SerialPort(1); // use ESP32 UART1
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
-  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
+  modbus_Sensor_result_th = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
 
   /* Serial1 Initialization */
-  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
   // Modbus slave ID
   modbus.begin(slaveId_th, SerialPort);
 
@@ -387,48 +414,59 @@ void ModbusTask_Sensor_th(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  while (1)
+  for (;;)
   {
-    if (allowsModbusTask_Sensor_th) // loop에서 허용해줌
+    // TZ_THT02
+    modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
+
+    if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
     {
-      // TZ_THT02
-      modbus_Sensor_result = modbus.readHoldingRegisters(0, 2); // 0x03
+      temp = float(modbus.getResponseBuffer(0) / 10.00F);
+      humi = float(modbus.getResponseBuffer(1) / 10.00F);
 
-      if (modbus_Sensor_result == modbus.ku8MBSuccess)
-      {
-        temp = float(modbus.getResponseBuffer(0) / 10.00F);
-        humi = float(modbus.getResponseBuffer(1) / 10.00F);
+      // Get response data from sensor
+      // allowsModbusTask_Sensor_th = false;
 
-        // Get response data from sensor
-        // allowsModbusTask_Sensor_th = false;
-
-        allowsPublishTEMP = true;
-        allowsPublishHUMI = true;
-        publishSensorData();
-      }
-      // 오류 처리
-      else
-      {
-        // loop()에서 modbus_Sensor_result switch로 조건별 출력
-      }
-      allowsModbusTask_Sensor_th = false;
+      allowsPublishTEMP = true;
+      allowsPublishHUMI = true;
+      publishSensorData();
     }
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // 오류 처리
+    else
+    {
+      allowsPublishSensor_result_th = true;
+      publishSensorResult();
+    }
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
 }
 
 // TM100 task
 void ModbusTask_Sensor_tm100(void *pvParameters)
 {
-  HardwareSerial SerialPort(1); // use ESP32 UART1
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
-  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
-  modbus.ku8MBIllegalFunction;
+  modbus_Sensor_result_tm100 = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
   /* Serial1 Initialization */
-  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
   // Modbus slave ID 10
   modbus.begin(slaveId_tm100, SerialPort);
 
@@ -436,49 +474,60 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  while (1)
+  for (;;)
   {
-    if (allowsModbusTask_Sensor_tm100) // loop에서 허용해줌
+    // TM-100
+    modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
+
+    if (modbus_Sensor_result_tm100 == modbus.ku8MBSuccess)
     {
-      // TM-100
-      modbus_Sensor_result = modbus.readInputRegisters(0, 3); // 0x04
+      temp = float(modbus.getResponseBuffer(0) / 10.00F);
+      humi = float(modbus.getResponseBuffer(1) / 10.00F);
+      errBit = modbus.getResponseBuffer(2);
 
-      if (modbus_Sensor_result == modbus.ku8MBSuccess)
-      {
-        temp = float(modbus.getResponseBuffer(0) / 10.00F);
-        humi = float(modbus.getResponseBuffer(1) / 10.00F);
-        errBit = modbus.getResponseBuffer(2);
+      // Get response data from sensor
+      // allowsModbusTask_Sensor_tm100 = false;
 
-        // Get response data from sensor
-        // allowsModbusTask_Sensor_tm100 = false;
-
-        allowsPublishTEMP = true;
-        allowsPublishHUMI = true;
-        publishSensorData();
-      }
-      // 오류 처리
-      else
-      {
-        // loop()에서 modbus_Sensor_result switch로 조건별 출력
-      }
-      allowsModbusTask_Sensor_tm100 = false;
+      allowsPublishTEMP = true;
+      allowsPublishHUMI = true;
+      publishSensorData();
     }
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // 오류 처리
+    else
+    {
+      allowsPublishSensor_result_tm100 = true;
+      publishSensorResult();
+    }
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
 }
 
 // 감우 센서 task
 void ModbusTask_Sensor_rain(void *pvParameters)
 {
-  HardwareSerial SerialPort(1); // use ESP32 UART1
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
-  modbus_Sensor_result = modbus.ku8MBInvalidCRC;
+  modbus_Sensor_result_rain = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
 
   /* Serial1 Initialization */
-  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
   // Modbus slave ID 2
   modbus.begin(slaveId_rain, SerialPort);
 
@@ -486,48 +535,51 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  while (1)
+  for (;;)
   {
-    if (allowsModbusTask_Sensor_rain) // loop에서 허용해줌
+    // CNT-WJ24
+    modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
+
+    if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
     {
-      // CNT-WJ24
-      modbus_Sensor_result = modbus.readInputRegisters(0x64, 3); // 0x04
+      int rainDetectBit = modbus.getResponseBuffer(2);
+      // 각 판의 비 감지 상태
+      bool plate1Detected = rainDetectBit & (1 << 7);
+      bool plate2Detected = rainDetectBit & (1 << 8);
+      bool plate3Detected = rainDetectBit & (1 << 9);
 
-      if (modbus_Sensor_result == modbus.ku8MBSuccess)
+      // 최소 두 개의 감지판에서 비가 감지되는지 확인
+      int detectedCount = plate1Detected + plate2Detected + plate3Detected;
+      if (detectedCount >= 2)
       {
-        int rainDetectBit = modbus.getResponseBuffer(2);
-        // 각 판의 비 감지 상태
-        bool plate1Detected = rainDetectBit & (1 << 7);
-        bool plate2Detected = rainDetectBit & (1 << 8);
-        bool plate3Detected = rainDetectBit & (1 << 9);
-
-        // 최소 두 개의 감지판에서 비가 감지되는지 확인
-        int detectedCount = plate1Detected + plate2Detected + plate3Detected;
-        if (detectedCount >= 2)
-        {
-          isRainy = true; // 비 감지됨
-        }
-        else
-        {
-          isRainy = false; // 비 미감지
-        }
-
-        // Get response data from sensor
-        // allowsModbusTask_Sensor_rain = false;
-
-        allowsPublishRAIN;
-        publishSensorData();
+        isRainy = true; // 비 감지됨
       }
-      // 오류 처리
       else
       {
-        // loop()에서 modbus_Sensor_result switch로 조건별 출력
+        isRainy = false; // 비 미감지
       }
-      allowsModbusTask_Sensor_rain = false;
+
+      // Get response data from sensor
+      // allowsModbusTask_Sensor_rain = false;
+
+      allowsPublishRAIN = true;
+      publishSensorData();
     }
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // 오류 처리
+    else
+    {
+      allowsPublishSensor_result_rain = true;
+      publishSensorResult();
+    }
+
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
 }
 
@@ -751,8 +803,9 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.println(testMsg3);
   // DebugSerial.println(testMsg4);
   // DebugSerial.println(testMsg5);
-  DebugSerial.print("testBit: ");
-  DebugSerial.println(testBit);
+
+  // DebugSerial.print("testBit: ");
+  // DebugSerial.println(testBit);
 
   // 버퍼 초기화 및 메모리 해제
   // testMsg1 = "";
@@ -760,7 +813,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   // testMsg3 = "";
   // testMsg4 = "";
   // testMsg5 = "";
-  testBit = -1;
+
+  // testBit = -1;
 
   readingStatusRegister[0] = 0;
   writingRegisters[2] = 0; // mapping write
@@ -803,7 +857,7 @@ void reconnect()
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
     // if (client.connect(clientId.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
-    if (client.connect(clientId.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (WILL_TOPIC + DEVICE_TOPIC).c_str(), QOS, 0, WILL_MESSAGE.c_str()))
+    if (client.connect(clientId.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (WILL_TOPIC + DEVICE_TOPIC).c_str(), QOS, 0, (clientId + " " + WILL_MESSAGE).c_str()))
     {
       DebugSerial.println("connected");
 
@@ -888,12 +942,12 @@ void publishSensorData()
   // 감우
   if (allowsPublishRAIN)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? "비" : "X").c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? "Rainy" : "X").c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "rain");
     // DebugSerial.println("] ");
-    // DebugSerial.println(isRainy ? "비" : "X");
+    // DebugSerial.println(isRainy ? "rainy" : "X");
 
     allowsPublishRAIN = false;
   }
@@ -1168,21 +1222,33 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  // extAntenna();
+  // RS485 Setup
+  // RS485 제어 핀 초기화
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
 
-  // /* TYPE1SC Module Initialization */
-  // if (TYPE1SC.init())
-  // {
-  //   DebugSerial.println("TYPE1SC Module Error!!!");
-  // }
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
 
-  // /* Network Regsistraiton Check */
-  // while (TYPE1SC.canConnect() != 0)
-  // {
-  //   DebugSerial.println("Network not Ready!!!");
-  //   delay(2000);
-  // }
-  // DebugSerial.println("TYPE1SC Module Ready!!!");
+  /* Serial1 Initialization */
+  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+
+  extAntenna();
+
+  /* TYPE1SC Module Initialization */
+  if (TYPE1SC.init())
+  {
+    DebugSerial.println("TYPE1SC Module Error!!!");
+  }
+
+  /* Network Regsistraiton Check */
+  while (TYPE1SC.canConnect() != 0)
+  {
+    DebugSerial.println("Network not Ready!!!");
+    delay(2000);
+  }
+  DebugSerial.println("TYPE1SC Module Ready!!!");
 
   // File System Setup
   initSPIFFS();
@@ -1354,17 +1420,6 @@ void setup()
     clientId = mqttUsername;
     DEVICE_TOPIC = "/" + clientId;
     PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_TOPIC).c_str()); // pub_topic의 길이 계산
-
-    // 240528
-
-    // RS485 Setup
-    // RS485 제어 핀 초기화
-    pinMode(dePin, OUTPUT);
-    pinMode(rePin, OUTPUT);
-
-    // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-    digitalWrite(dePin, LOW);
-    digitalWrite(rePin, LOW);
 
     DebugSerial.println("TYPE1SC Module Start!!!");
 
