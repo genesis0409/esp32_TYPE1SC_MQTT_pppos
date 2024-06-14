@@ -28,7 +28,7 @@
                 id="mqttUsername"
                 name="mqttUsername"
                 value="farmtalkSwitch00"
-                aria-required="true"
+                required
                 autofocus
               />
               <br />
@@ -38,7 +38,7 @@
                 id="mqttPw"
                 name="mqttPw"
                 value="Farmtalk@123"
-                aria-required="true"
+                required
               /><img
                 src="eye.svg"
                 style="vertical-align: middle"
@@ -54,7 +54,7 @@
                 id="hostId"
                 name="hostId"
                 value="broker.hivemq.com"
-                aria-required="true"
+                required
               />
               <br />
               <label for="port">Port</label>
@@ -63,7 +63,7 @@
                 id="port"
                 name="port"
                 value="1883"
-                aria-required="true"
+                required
               /><br />
               <br />
               <hr class="hr-text" data-content="Modubs Settings">
@@ -91,10 +91,8 @@
                 type="number"
                 id="slaveId_01_short"
                 name="slaveId_01"
-                aria-required="true"
               />
 
-              <!--
               <hr class="hr-text" data-content="">
 
               <label for="sensorId_02_short">Sensor 02</label>
@@ -103,15 +101,14 @@
                 name="sensorId_02"
                 class="comboBox"
               >
-                
                 <option value="sensorId_none">선택하지 않음</option>
-                <option id="boundaryLine" disabled>-------------------------------</option>
+                <option id="boundaryLine" disabled>
+                  -------------------------------
+                </option>
                 <option value="sensorId_th">온습도 센서</option>
                 <option value="sensorId_tm100">TM-100</option>
                 <option value="sensorId_rain">감우 센서</option>
-                <option value="sensorId_ec" disabled>
-                  지온·지습·EC 센서
-                </option>
+                <option value="sensorId_ec" disabled>지온·지습·EC 센서</option>
                 <option value="sensorId_soil" disabled>수분장력 센서</option>
               </select>
               <br />
@@ -120,9 +117,7 @@
                 type="number"
                 id="slaveId_02_short"
                 name="slaveId_02"
-                aria-required="true"
               />
-              -->
 
               <hr class="hr-text" data-content="">
 
@@ -145,7 +140,7 @@
                 id="slaveId_relay_short"
                 name="slaveId_relay"
                 value="5"
-                aria-required="true"
+                required
               />
 
               <hr class="hr-text" data-content="">
