@@ -87,17 +87,23 @@ bool isRainy = false;
 float soilPotential = 0;
 bool errBit;
 
+// 센서 value 발행 허용 여부
 bool allowsPublishTEMP = false;
 bool allowsPublishHUMI = false;
 bool allowsPublishEC = false;
 bool allowsPublishRAIN = false;
 bool allowsPublishSoilP = false;
 
+// modbus 오류 시 센서 result 발행 허용 여부
 bool allowsPublishSensor_result_th = false;
 bool allowsPublishSensor_result_tm100 = false;
 bool allowsPublishSensor_result_rain = false;
 bool allowsPublishSensor_result_ec = false;
 bool allowsPublishSensor_result_soil = false;
+
+// modbus 센서 value 수집 간격 설정; 추가 센서 1개당 10% 지연
+bool allows2ndSensorTaskDelay = false;
+bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
 
 // PPPOS, MQTT settings ***************************************************************************
 char *ppp_user = "daonTest01";
@@ -415,6 +421,18 @@ void ModbusTask_Sensor_th(void *pvParameters)
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
 
+  // 센서가 추가될 때마다 10%의 지연
+  if (allows2ndSensorTaskDelay && sensorId_02 == "sensorId_th")
+  {
+    vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 1); // 주기의 10% 지연
+  }
+
+  // n번째 센서 추가 대비용
+  // if (allows3rdSensorTaskDelay && sensorId_03 == "sensorId_th")
+  // {
+  //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
+  // }
+
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
@@ -474,6 +492,18 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
+  // 센서가 추가될 때마다 10%의 지연
+  if (allows2ndSensorTaskDelay && sensorId_02 == "sensorId_tm100")
+  {
+    vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 1); // 주기의 10% 지연
+  }
+
+  // n번째 센서 추가 대비용
+  // if (allows3rdSensorTaskDelay && sensorId_03 == "sensorId_tm100")
+  // {
+  //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
+  // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
@@ -535,6 +565,18 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
+  // 센서가 추가될 때마다 10%의 지연
+  if (allows2ndSensorTaskDelay && sensorId_02 == "sensorId_rain")
+  {
+    vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 1); // 주기의 10% 지연
+  }
+
+  // n번째 센서 추가 대비용
+  // if (allows3rdSensorTaskDelay && sensorId_03 == "sensorId_rain")
+  // {
+  //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
+  // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
@@ -1529,7 +1571,10 @@ void setup()
         slaveId_th = slaveId_01.toInt();
 
       else if (sensorId_02 == "sensorId_th")
+      {
         slaveId_th = slaveId_02.toInt();
+        allows2ndSensorTaskDelay = true;
+      }
 
       // DebugSerial.print("slaveId_th: ");
       // DebugSerial.println(slaveId_th);
@@ -1547,7 +1592,10 @@ void setup()
         slaveId_tm100 = slaveId_01.toInt();
 
       else if (sensorId_02 == "sensorId_tm100")
+      {
         slaveId_tm100 = slaveId_02.toInt();
+        allows2ndSensorTaskDelay = true;
+      }
 
       // DebugSerial.print("slaveId_tm100: ");
       // DebugSerial.println(slaveId_tm100);
@@ -1565,7 +1613,10 @@ void setup()
         slaveId_rain = slaveId_01.toInt();
 
       else if (sensorId_02 == "sensorId_rain")
+      {
         slaveId_rain = slaveId_02.toInt();
+        allows2ndSensorTaskDelay = true;
+      }
 
       // DebugSerial.print("slaveId_rain: ");
       // DebugSerial.println(slaveId_rain);
@@ -1583,7 +1634,10 @@ void setup()
         slaveId_ec = slaveId_01.toInt();
 
       else if (sensorId_02 == "sensorId_ec")
+      {
         slaveId_ec = slaveId_02.toInt();
+        allows2ndSensorTaskDelay = true;
+      }
 
       // DebugSerial.print("slaveId_ec: ");
       // DebugSerial.println(slaveId_ec);
@@ -1601,7 +1655,10 @@ void setup()
         slaveId_soil = slaveId_01.toInt();
 
       else if (sensorId_02 == "sensorId_soil")
+      {
         slaveId_soil = slaveId_02.toInt();
+        allows2ndSensorTaskDelay = true;
+      }
 
       // DebugSerial.print("slaveId_soil: ");
       // DebugSerial.println(slaveId_soil);
