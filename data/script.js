@@ -115,3 +115,63 @@ $(function () {
   // 페이지 로드 시 초기화
   updateSelects();
 });
+
+// select 태그의 값이 변경될 때마다 input 태그의 required 속성을 조정
+// 문서가 준비되면 실행되는 함수
+$(function () {
+  // select 요소의 값에 따라 input 요소의 required 속성을 토글하는 함수
+  function toggleRequiredAttribute(sensorId, slaveId) {
+    var selectedSensor = $(sensorId).val();
+    var $input = $(slaveId);
+
+    if (selectedSensor === "sensorId_none") {
+      $input.removeAttr("required");
+    } else {
+      $input.attr("required", "required");
+    }
+  }
+
+  function setupSensorAndSlave(sensorId, slaveId) {
+    // select 요소에 change 이벤트 리스너를 추가하고 초기 상태 설정
+    $(sensorId).change(function () {
+      toggleRequiredAttribute(sensorId, slaveId);
+    });
+
+    // 초기 로드 시에도 select 요소의 값에 따라 required 속성을 설정
+    toggleRequiredAttribute(sensorId, slaveId);
+  }
+
+  // Sensor 01과 Slave ID 01에 대한 설정
+  setupSensorAndSlave("#sensorId_01_short", "#slaveId_01_short");
+
+  // Sensor 02와 Slave ID 02에 대한 설정
+  setupSensorAndSlave("#sensorId_02_short", "#slaveId_02_short");
+});
+
+// // sensorId_01
+// $(function () {
+//   $("#sensorId_01_short").change(function () {
+//     var selectValue = $(this).val();
+//     var $input = $("#slaveId_01_short");
+
+//     if (selectValue === "sensorId_none") {
+//       $input.removeAttr("required");
+//     } else {
+//       $input.attr("required", "required");
+//     }
+//   });
+// });
+
+// // sensorId_02
+// $(function () {
+//   $("#sensorId_02_short").change(function () {
+//     var selectValue = $(this).val();
+//     var $input = $("#slaveId_02_short");
+
+//     if (selectValue === "sensorId_none") {
+//       $input.removeAttr("required");
+//     } else {
+//       $input.attr("required", "required");
+//     }
+//   });
+// });
