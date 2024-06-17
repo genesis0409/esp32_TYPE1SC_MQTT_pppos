@@ -625,7 +625,80 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   }
 }
 
-void ModbusTask_Sensor_ec(void *pvParameters) {}   // 지온·지습·EC 센서 task
+// 지온·지습·EC 센서 task
+void ModbusTask_Sensor_ec(void *pvParameters)
+{
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Sensor_result_ec = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
+  /* Serial1 Initialization */
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 30
+  modbus.begin(slaveId_ec, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+
+  // 센서가 추가될 때마다 10%의 지연
+  if (allows2ndSensorTaskDelay && sensorId_02 == "sensorId_ec")
+  {
+    vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 1); // 주기의 10% 지연
+  }
+
+  // n번째 센서 추가 대비용
+  // if (allows3rdSensorTaskDelay && sensorId_03 == "sensorId_ec")
+  // {
+  //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
+  // }
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  for (;;)
+  {
+    // RK520-02
+    modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
+
+    if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
+    {
+      temp = float(modbus.getResponseBuffer(0) / 10.00F);
+      humi = float(modbus.getResponseBuffer(1) / 10.00F);
+      ec = float(modbus.getResponseBuffer(2) / 1000.00F);
+
+      // Get response data from sensor
+      // allowsModbusTask_Sensor_ec = false;
+
+      allowsPublishTEMP = true;
+      allowsPublishHUMI = true;
+      allowsPublishEC = true;
+      publishSensorData();
+    }
+    // 오류 처리
+    else
+    {
+      allowsPublishSensor_result_ec = true;
+      publishSensorResult();
+    }
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
+  }
+}
+
 void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
 
 void preTransmission()
