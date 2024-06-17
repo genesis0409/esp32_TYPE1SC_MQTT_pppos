@@ -54,15 +54,7 @@ $(function () {
         false
       );
 
-      // value가 "sensorId_ec", "sensorId_soil"인 옵션을 비활성화
-      $('#sensorId_01_short option[value="sensorId_ec"]').prop(
-        "disabled",
-        true
-      );
-      $('#sensorId_02_short option[value="sensorId_ec"]').prop(
-        "disabled",
-        true
-      );
+      // value가 "sensorId_soil"인 옵션을 비활성화
       $('#sensorId_01_short option[value="sensorId_soil"]').prop(
         "disabled",
         true
@@ -91,15 +83,7 @@ $(function () {
         false
       );
 
-      // value가 "sensorId_ec", "sensorId_soil"인 옵션을 비활성화
-      $('#sensorId_01_short option[value="sensorId_ec"]').prop(
-        "disabled",
-        true
-      );
-      $('#sensorId_02_short option[value="sensorId_ec"]').prop(
-        "disabled",
-        true
-      );
+      // value가 "sensorId_soil"인 옵션을 비활성화
       $('#sensorId_01_short option[value="sensorId_soil"]').prop(
         "disabled",
         true
