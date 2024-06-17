@@ -394,7 +394,7 @@ void ModbusTask_Relay(void *pvParameters)
   }
 }
 
-// 온습도 센서 task
+// 온습도 센서(THT-02) task
 void ModbusTask_Sensor_th(void *pvParameters)
 {
   // HardwareSerial SerialPort(1); // use ESP32 UART1
@@ -413,7 +413,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID
+  // Modbus slave ID 1(기기 자체 물리적 커스텀 가능)
   modbus.begin(slaveId_th, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
@@ -438,9 +438,9 @@ void ModbusTask_Sensor_th(void *pvParameters)
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  for (;;)
+  do
   {
-    // TZ_THT02
+    // THT-02
     modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
 
     if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
@@ -463,10 +463,10 @@ void ModbusTask_Sensor_th(void *pvParameters)
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
-  }
+  } while (true);
 }
 
-// TM100 task
+// 온습도 센서(TM-100) task
 void ModbusTask_Sensor_tm100(void *pvParameters)
 {
   // HardwareSerial SerialPort(1); // use ESP32 UART1
@@ -510,7 +510,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  for (;;)
+  do
   {
     // TM-100
     modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
@@ -536,7 +536,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
-  }
+  } while (true);
 }
 
 // 감우 센서 task
@@ -583,7 +583,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  for (;;)
+  do
   {
     // CNT-WJ24
     modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
@@ -622,7 +622,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
-  }
+  } while (true);
 }
 
 // 지온·지습·EC 센서 task
@@ -669,7 +669,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
-  for (;;)
+  do
   {
     // RK520-02
     modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
@@ -696,7 +696,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
-  }
+  } while (true);
 }
 
 void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
