@@ -227,7 +227,7 @@ bool allowsModbusTask_Relay = false;
 // bool isSelectedModbusTask_Sensor_soil = false;
 
 // 각 node task
-void ModbusTask_Relay(void *pvParameters);        // Task에 등록할 modbus relay 제어
+void ModbusTask_Relay_8ch(void *pvParameters);    // Task에 등록할 modbus relay 제어
 void ModbusTask_Sensor_th(void *pvParameters);    // 온습도 센서 task
 void ModbusTask_Sensor_tm100(void *pvParameters); // TM100 task
 void ModbusTask_Sensor_rain(void *pvParameters);  // 감우 센서 task
@@ -279,7 +279,7 @@ void createSensorTask(const char *sensorId_01, int INT_slaveId_01, const char *s
 }
 
 // pppos client task보다 우선하는 modbus task
-void ModbusTask_Relay(void *pvParameters)
+void ModbusTask_Relay_8ch(void *pvParameters)
 {
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
@@ -1621,7 +1621,7 @@ void setup()
       DebugSerial.println("Starting PPPOS... Failed");
     }
 
-    xTaskCreate(&ModbusTask_Relay, "ModbusTask_Relay", 2048, NULL, 7, NULL); // Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    xTaskCreate(&ModbusTask_Relay_8ch, "ModbusTask_Relay_8ch", 2048, NULL, 7, NULL); // Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
 
     // // 각 센서 ID와 해당하는 Slave ID 변수, Task 함수를 매핑한 배열입니다.
     // // 센서 추가 시 이 배열에 원소 추가하면 됨
