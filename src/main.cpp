@@ -942,7 +942,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     // topic으로 한번 구분하고 (r1~)
     if (strstr(topic, "/r01")) // 릴레이 채널 1 (인덱스 0)
     {
-      suffix = "/r01";  // 추가할 문자열을 설정
+      suffix = "/r01"; // 추가할 문자열을 설정
       index_relay = 0; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -955,7 +955,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
     else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
     {
-      suffix = "/r02";  // 추가할 문자열을 설정
+      suffix = "/r02"; // 추가할 문자열을 설정
       index_relay = 1; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -967,7 +967,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
     {
-      suffix = "/r03";  // 추가할 문자열을 설정
+      suffix = "/r03"; // 추가할 문자열을 설정
       index_relay = 2; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -979,7 +979,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
     {
-      suffix = "/r04";  // 추가할 문자열을 설정
+      suffix = "/r04"; // 추가할 문자열을 설정
       index_relay = 3; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -991,7 +991,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
     {
-      suffix = "/r05";  // 추가할 문자열을 설정
+      suffix = "/r05"; // 추가할 문자열을 설정
       index_relay = 4; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -1003,7 +1003,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
     {
-      suffix = "/r06";  // 추가할 문자열을 설정
+      suffix = "/r06"; // 추가할 문자열을 설정
       index_relay = 5; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -1015,7 +1015,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
     {
-      suffix = "/r07";  // 추가할 문자열을 설정
+      suffix = "/r07"; // 추가할 문자열을 설정
       index_relay = 6; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -1027,7 +1027,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
     {
-      suffix = "/r08";  // 추가할 문자열을 설정
+      suffix = "/r08"; // 추가할 문자열을 설정
       index_relay = 7; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
@@ -1044,7 +1044,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
       if (strstr(topic, "/r09")) // 릴레이 채널 9 (인덱스 8)
       {
-        suffix = "/r09";  // 추가할 문자열을 설정
+        suffix = "/r09"; // 추가할 문자열을 설정
         index_relay = 8; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
