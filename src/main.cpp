@@ -106,8 +106,8 @@ bool allows2ndSensorTaskDelay = false;
 bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
 
 // PPPOS, MQTT settings ***************************************************************************
-char *ppp_user = "daonTest01";
-char *ppp_pass = "daon7521";
+const char *ppp_user = "daonTest01";
+const char *ppp_pass = "daon7521";
 
 String APN = "simplio.apn";
 TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
@@ -144,7 +144,7 @@ String DEVICE_TOPIC; // /farmtalkSwitch00
 int PUB_TOPIC_length;
 
 String payloadBuffer = ""; // 메시지 스플릿을 위한 페이로드 버퍼 변수
-char *suffix = "";         // 추가할 문자열을 설정
+String suffix = "";         // 추가할 문자열을 설정
 
 #define BIT_SELECT 1
 #define BIT_ON 1
@@ -1255,12 +1255,12 @@ void reconnect()
 void publishNewTopic()
 {
   // 발행 주제 설정
-  int suffix_length = strlen(suffix); // 추가할 문자열(suffix)의 길이 계산
+  int suffix_length = strlen(suffix.c_str()); // 추가할 문자열(suffix)의 길이 계산
 
   // 새로운 문자열을 저장할 메모리 할당
   char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
   strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_TOPIC).c_str());                  // PUB_TOPIC의 내용을 새로운 문자열에 복사
-  strcat(new_PUB_TOPIC, suffix);                                              // suffix를 새로운 문자열에 추가
+  strcat(new_PUB_TOPIC, suffix.c_str());                                      // suffix를 새로운 문자열에 추가
 
   // topic: "type1sc/update/farmtalkSwitch00" + "r-"
   client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
@@ -1864,7 +1864,7 @@ void setup()
     // pinMode(EXT_LED, OUTPUT);
 
     /* PPPOS Setup */
-    PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, ppp_user, ppp_pass); // PPPOS 설정
+    PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, (char *)ppp_user, (char *)ppp_pass); // PPPOS 설정
     client.setServer(hostId.c_str(), port.toInt());                     // MQTT 클라이언트를 설정
                                                                         // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
     client.setCallback(callback);                                       // mqtt 메시지 수신 콜백 등록
