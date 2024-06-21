@@ -144,7 +144,7 @@ String DEVICE_TOPIC; // /farmtalkSwitch00
 int PUB_TOPIC_length;
 
 String payloadBuffer = ""; // 메시지 스플릿을 위한 페이로드 버퍼 변수
-String suffix = "";         // 추가할 문자열을 설정
+String suffix = "";        // 추가할 문자열을 설정
 
 #define BIT_SELECT 1
 #define BIT_ON 1
@@ -1587,6 +1587,22 @@ bool isWMConfigDefined()
   return true;
 }
 
+void getTime()
+{
+  /* Get Time (GMT, (+36/4) ==> Korea +9hour) */
+  char szTime[32];
+  if (TYPE1SC.getCCLK(szTime, sizeof(szTime)) == 0)
+  {
+    // client.publish((PUB_TOPIC + DEVICE_TOPIC + "/time").c_str(), szTime);
+    // DebugSerial.print("Time : ");
+    // DebugSerial.println(szTime);
+  }
+  else
+  {
+    strncpy(szTime, "nullTime", sizeof(szTime) - 1);
+    szTime[sizeof(szTime) - 1] = '\0'; // Ensure null-termination
+  }
+}
 void setup()
 {
   // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -1865,9 +1881,9 @@ void setup()
 
     /* PPPOS Setup */
     PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, (char *)ppp_user, (char *)ppp_pass); // PPPOS 설정
-    client.setServer(hostId.c_str(), port.toInt());                     // MQTT 클라이언트를 설정
-                                                                        // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
-    client.setCallback(callback);                                       // mqtt 메시지 수신 콜백 등록
+    client.setServer(hostId.c_str(), port.toInt());                                     // MQTT 클라이언트를 설정
+                                                                                        // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
+    client.setCallback(callback);                                                       // mqtt 메시지 수신 콜백 등록
     DebugSerial.println("Starting PPPOS...");
 
     if (startPPPOS())
