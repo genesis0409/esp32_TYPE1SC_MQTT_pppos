@@ -1315,12 +1315,12 @@ void publishSensorData()
   // 감우
   if (allowsPublishRAIN)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? "Rainy" : "X").c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? 1 : 0).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "rain");
     // DebugSerial.println("] ");
-    // DebugSerial.println(isRainy ? "rainy" : "X");
+    // DebugSerial.println(isRainy ? 1 : 0);
 
     allowsPublishRAIN = false;
   }
