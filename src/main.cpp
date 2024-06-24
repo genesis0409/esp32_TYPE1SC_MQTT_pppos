@@ -1496,7 +1496,7 @@ const char *getStatus(int value)
 // Initialize SPIFFS
 void initSPIFFS()
 {
-  if (!SPIFFS.begin(true)) // true: FORMAT_SPIFFS_IF_FAILED
+  if (!SPIFFS.begin()) // true: FORMAT_SPIFFS_IF_FAILED
   {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
@@ -1611,34 +1611,22 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  // RS485 Setup
-  // RS485 제어 핀 초기화
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
+  // /* TYPE1SC Module Initialization */
+  // if (TYPE1SC.init())
+  // {
+  //   DebugSerial.println("TYPE1SC Module Error!!!");
+  // }
 
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
+  // /* Network Regsistraiton Check */
+  // while (TYPE1SC.canConnect() != 0)
+  // {
+  //   DebugSerial.println("Network not Ready!!!");
+  //   delay(2000);
+  // }
+  // DebugSerial.println("TYPE1SC Module Ready!!!");
 
-  /* Serial1 Initialization */
-  SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-
-  extAntenna();
-
-  /* TYPE1SC Module Initialization */
-  if (TYPE1SC.init())
-  {
-    DebugSerial.println("TYPE1SC Module Error!!!");
-  }
-
-  /* Network Regsistraiton Check */
-  while (TYPE1SC.canConnect() != 0)
-  {
-    DebugSerial.println("Network not Ready!!!");
-    delay(2000);
-  }
-  DebugSerial.println("TYPE1SC Module Ready!!!");
-
+  delay(1000); // Serial.begin() takes some time...
+  DebugSerial.println("init SPIFFS...");
   // File System Setup
   initSPIFFS();
 
@@ -1805,6 +1793,18 @@ void setup()
   // 설정 완료 후: LTE/PPPOS/MQTT 연결
   else
   {
+    // RS485 Setup
+    // RS485 제어 핀 초기화
+    pinMode(dePin, OUTPUT);
+    pinMode(rePin, OUTPUT);
+
+    // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+    digitalWrite(dePin, LOW);
+    digitalWrite(rePin, LOW);
+
+    /* Serial1 Initialization */
+    SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+
     // Topic 관련 변수 초기화
     clientId = mqttUsername;
     DEVICE_TOPIC = "/" + clientId;
