@@ -1603,6 +1603,7 @@ void getTime()
     szTime[sizeof(szTime) - 1] = '\0'; // Ensure null-termination
   }
 }
+
 void setup()
 {
   // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
