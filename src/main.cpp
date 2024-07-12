@@ -77,7 +77,7 @@ unsigned long previousMillis = 0;
 void initSPIFFS();                                                 // Initialize SPIFFS
 String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
-bool isWMConfigDefined();                                          // Is Wifi Manager Configuration Defiend?
+bool isWMConfigDefined();                                          // Is Wifi Manager Configuration Defined?
 bool allowsLoop = false;
 
 float temp = 0;
@@ -893,7 +893,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   // 아직 사용 안하는 기능 240508
   // payload에 'on', 'off', 'dis'문자열이 포함되어 있는지 확인
-  // 포함되어있다면 ext_led high/low; atmode
+  // 포함되어있다면 ext_led high/low; AT mode
   // if (strstr((char *)p, "on"))
   // {
   //   digitalWrite(EXT_LED, HIGH);
@@ -1697,7 +1697,7 @@ void setup()
   //   DebugSerial.println("TYPE1SC Module Error!!!");
   // }
 
-  // /* Network Regsistraiton Check */
+  // /* Network Registration Check */
   // while (TYPE1SC.canConnect() != 0)
   // {
   //   DebugSerial.println("Network not Ready!!!");
@@ -1752,7 +1752,7 @@ void setup()
     // Connect to Wi-Fi network with SSID and pass
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("FarmtalkSwitch01-Manager", NULL);
+    WiFi.softAP("FarmtalkSwitch00-Manager", NULL);
 
     IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
     Serial.print("AP IP address: ");
@@ -1900,7 +1900,7 @@ void setup()
       DebugSerial.println("TYPE1SC Module Error!!!");
     }
 
-    /* Network Regsistraiton Check */
+    /* Network Registration Check */
     while (TYPE1SC.canConnect() != 0)
     {
       DebugSerial.println("Network not Ready !!!");
