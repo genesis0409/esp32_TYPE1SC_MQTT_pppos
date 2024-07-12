@@ -101,6 +101,12 @@ bool allowsPublishSensor_result_rain = false;
 bool allowsPublishSensor_result_ec = false;
 bool allowsPublishSensor_result_soil = false;
 
+// 릴레이 상태 획득 성공 발행 여부
+bool allowsPublishStatus = false;
+
+// 릴레이 제어 성공 발행 여부
+bool allowsPublishNewTopic = false;
+
 // modbus 센서 value 수집 간격 설정; 추가 센서 1개당 10% 지연
 bool allows2ndSensorTaskDelay = false;
 bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
@@ -325,6 +331,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
+          allowsPublishStatus = true;
         }
 
         allowsModbusTask_Relay = false;
@@ -384,6 +391,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
+          allowsPublishNewTopic = true;
         }
         else
         {
@@ -441,6 +449,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
+          allowsPublishStatus = true;
         }
 
         allowsModbusTask_Relay = false;
@@ -525,6 +534,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
+          allowsPublishNewTopic = true;
         }
         else
         {
@@ -950,7 +960,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
 
     else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
@@ -963,7 +977,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
     {
@@ -975,7 +993,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
     {
@@ -987,7 +1009,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
     {
@@ -999,7 +1025,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
     {
@@ -1011,7 +1041,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
     {
@@ -1023,7 +1057,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
     else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
     {
@@ -1035,7 +1073,11 @@ void callback(char *topic, byte *payload, unsigned int length)
       {
         delay(1);
       }
-      publishNewTopic();
+      if (allowsPublishNewTopic)
+      {
+        publishNewTopic();
+        allowsPublishNewTopic = false;
+      }
     }
 
     // 8채널이 아닐 때 (16채널 이상)
@@ -1052,7 +1094,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r10")) // 릴레이 채널 10 (인덱스 9)
       {
@@ -1064,7 +1110,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r11")) // 릴레이 채널 11 (인덱스 10)
       {
@@ -1076,7 +1126,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r12")) // 릴레이 채널 12 (인덱스 11)
       {
@@ -1088,7 +1142,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r13")) // 릴레이 채널 13 (인덱스 12)
       {
@@ -1100,7 +1158,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r14")) // 릴레이 채널 14 (인덱스 13)
       {
@@ -1112,7 +1174,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r15")) // 릴레이 채널 15 (인덱스 14)
       {
@@ -1124,7 +1190,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
       else if (strstr(topic, "/r16")) // 릴레이 채널 16 (인덱스 15)
       {
@@ -1136,7 +1206,11 @@ void callback(char *topic, byte *payload, unsigned int length)
         {
           delay(1);
         }
-        publishNewTopic();
+        if (allowsPublishNewTopic)
+        {
+          publishNewTopic();
+          allowsPublishNewTopic = false;
+        }
       }
     }
   }
@@ -1147,8 +1221,13 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       delay(1);
     }
-    // topic: "type1sc/update/farmtalkSwitch00
-    client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
+
+    if (allowsPublishStatus)
+    {
+      // topic: "type1sc/update/farmtalkSwitch00
+      client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
+      allowsPublishStatus = false;
+    }
   }
 
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
