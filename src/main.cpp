@@ -753,9 +753,8 @@ void ModbusTask_Sensor_rain(void *pvParameters)
       bool plate2Detected = rainDetectBit & (1 << 8);
       bool plate3Detected = rainDetectBit & (1 << 9);
 
-      // 최소 두 개의 감지판에서 비가 감지되는지 확인
-      int detectedCount = plate1Detected + plate2Detected + plate3Detected;
-      if (detectedCount >= 2)
+      // 3면의 감지판에서 모두 비가 감지되는지 확인
+      if (plate1Detected && plate2Detected && plate3Detected)
       {
         isRainy = true; // 비 감지됨
       }
