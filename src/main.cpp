@@ -747,14 +747,19 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 
     if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
     {
+      // 감우센서 온습도 훗날 사용?
+      float temp_CNT_WJ24 = float(modbus.getResponseBuffer(0) / 10.00F);
+      float humi_CNT_WJ24 = float(modbus.getResponseBuffer(1)); // 정수
+
       int rainDetectBit = modbus.getResponseBuffer(2);
       // 각 판의 비 감지 상태
       bool plate1Detected = rainDetectBit & (1 << 7);
       bool plate2Detected = rainDetectBit & (1 << 8);
       bool plate3Detected = rainDetectBit & (1 << 9);
 
-      // 3면의 감지판에서 모두 비가 감지되는지 확인
-      if (plate1Detected && plate2Detected && plate3Detected)
+      // 최소 두 개의 감지판에서 비가 감지되는지 확인
+      int detectedCount = plate1Detected + plate2Detected + plate3Detected;
+      if (detectedCount >= 2)
       {
         isRainy = true; // 비 감지됨
       }
