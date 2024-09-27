@@ -309,8 +309,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 5
-  modbus.begin(relayId.toInt(), SerialPort);
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay.toInt(), SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -427,8 +427,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 5
-  modbus.begin(relayId.toInt(), SerialPort);
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay.toInt(), SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
