@@ -68,10 +68,20 @@ input[type="submit"]:hover {
 input[type="text"],
 input[type="number"],
 input[type="email"],
-input[type="password"],
 input[type="url"],
 select {
-  width: 50%;
+  width: 40%;
+  padding: 12px 20px;
+  margin: 10px;
+  display: inline-block;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+#mqttPw,
+input[type="password"] {
+  width: 37%;
   padding: 12px 20px;
   margin: 10px;
   display: inline-block;
@@ -93,6 +103,8 @@ select {
 
 label {
   font-size: 1.2rem;
+  display: inline-block;
+  width: 12.5%;
 }
 .value {
   font-size: 1.2rem;

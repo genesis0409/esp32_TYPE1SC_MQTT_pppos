@@ -37,6 +37,17 @@ $(function () {
     $('#sensorId_01_short option[id = "boundaryLine"]').prop("disabled", true);
     $('#sensorId_02_short option[id = "boundaryLine"]').prop("disabled", true);
 
+    // value가 'sensorId_soil'인 옵션(Teros 21)을 비활성화
+    $('#sensorId_01_short option[value="sensorId_soil"]').prop(
+      "disabled",
+      true
+    );
+    $('#sensorId_02_short option[value="sensorId_soil"]').prop(
+      "disabled",
+      true
+    );
+
+    // 1번 선택항목이 있을 때, 2번의 동일한 선택항목을 비활성화
     if (selectedValue1) {
       $('#sensorId_02_short option[value="' + selectedValue1 + '"]').prop(
         "disabled",
@@ -44,28 +55,13 @@ $(function () {
       );
 
       // 추가 기능 ******************************************************
-      // value가 "sensorId_none"인 옵션을 활성화
-      $('#sensorId_01_short option[value="sensorId_none"]').prop(
-        "disabled",
-        false
-      );
-      $('#sensorId_02_short option[value="sensorId_none"]').prop(
-        "disabled",
-        false
-      );
-
-      // value가 "sensorId_soil"인 옵션을 비활성화
-      $('#sensorId_01_short option[value="sensorId_soil"]').prop(
-        "disabled",
-        true
-      );
-      $('#sensorId_02_short option[value="sensorId_soil"]').prop(
-        "disabled",
-        true
-      );
+      // value가 ""인 옵션을 활성화
+      $('#sensorId_01_short option[value=""]').prop("disabled", false);
+      $('#sensorId_02_short option[value=""]').prop("disabled", false);
       // ***************************************************************
     }
 
+    // 2번 선택항목이 있을 때, 1번의 동일한 선택항목을 비활성화
     if (selectedValue2) {
       $('#sensorId_01_short option[value="' + selectedValue2 + '"]').prop(
         "disabled",
@@ -73,25 +69,9 @@ $(function () {
       );
 
       // 추가 기능 ******************************************************
-      // value가 "sensorId_none"인 옵션을 활성화
-      $('#sensorId_01_short option[value="sensorId_none"]').prop(
-        "disabled",
-        false
-      );
-      $('#sensorId_02_short option[value="sensorId_none"]').prop(
-        "disabled",
-        false
-      );
-
-      // value가 "sensorId_soil"인 옵션을 비활성화
-      $('#sensorId_01_short option[value="sensorId_soil"]').prop(
-        "disabled",
-        true
-      );
-      $('#sensorId_02_short option[value="sensorId_soil"]').prop(
-        "disabled",
-        true
-      );
+      // value가 ""인 옵션을 활성화
+      $('#sensorId_01_short option[value=""]').prop("disabled", false);
+      $('#sensorId_02_short option[value=""]').prop("disabled", false);
       // ***************************************************************
     }
   }
@@ -100,6 +80,7 @@ $(function () {
   updateSelects();
 });
 
+// 240925부터 미사용: input tag 생략
 // select 태그의 값이 변경될 때마다 input 태그의 required 속성을 조정
 // 문서가 준비되면 실행되는 함수
 $(function () {
@@ -108,7 +89,7 @@ $(function () {
     var selectedSensor = $(sensorId).val();
     var $input = $(slaveId);
 
-    if (selectedSensor === "sensorId_none") {
+    if (selectedSensor === "") {
       $input.removeAttr("required");
     } else {
       $input.attr("required", "required");
@@ -125,37 +106,9 @@ $(function () {
     toggleRequiredAttribute(sensorId, slaveId);
   }
 
-  // Sensor 01과 Slave ID 01에 대한 설정
-  setupSensorAndSlave("#sensorId_01_short", "#slaveId_01_short");
+  // // Sensor 01과 Slave ID 01에 대한 설정
+  // setupSensorAndSlave("#sensorId_01_short", "#slaveId_01_short");
 
-  // Sensor 02와 Slave ID 02에 대한 설정
-  setupSensorAndSlave("#sensorId_02_short", "#slaveId_02_short");
+  // // Sensor 02와 Slave ID 02에 대한 설정
+  // setupSensorAndSlave("#sensorId_02_short", "#slaveId_02_short");
 });
-
-// // sensorId_01
-// $(function () {
-//   $("#sensorId_01_short").change(function () {
-//     var selectValue = $(this).val();
-//     var $input = $("#slaveId_01_short");
-
-//     if (selectValue === "sensorId_none") {
-//       $input.removeAttr("required");
-//     } else {
-//       $input.attr("required", "required");
-//     }
-//   });
-// });
-
-// // sensorId_02
-// $(function () {
-//   $("#sensorId_02_short").change(function () {
-//     var selectValue = $(this).val();
-//     var $input = $("#slaveId_02_short");
-
-//     if (selectValue === "sensorId_none") {
-//       $input.removeAttr("required");
-//     } else {
-//       $input.attr("required", "required");
-//     }
-//   });
-// });
