@@ -1,77 +1,71 @@
-// 패스워드 visible/invisible
-$(function () {
-  $("#toggle-password").on("click", function () {
-    let passwordField = $("#mqttPw");
-    let passwordFieldType = passwordField.attr("type");
-    let toggleIcon = $("#toggle-password");
+// // 패스워드 visible/invisible
+// $(function () {
+//   $("#toggle-password").on("click", function () {
+//     let passwordField = $("#mqttPw");
+//     let passwordFieldType = passwordField.attr("type");
+//     let toggleIcon = $("#toggle-password");
 
-    if (passwordFieldType === "password") {
-      passwordField.attr("type", "text");
-      toggleIcon.attr("src", "eye-slash.svg");
-    } else {
-      passwordField.attr("type", "password");
-      toggleIcon.attr("src", "eye.svg");
-    }
-  });
-});
+//     if (passwordFieldType === "password") {
+//       passwordField.attr("type", "text");
+//       toggleIcon.attr("src", "eye-slash.svg");
+//     } else {
+//       passwordField.attr("type", "password");
+//       toggleIcon.attr("src", "eye.svg");
+//     }
+//   });
+// });
 
 // comboBox 중복 선택 배제
 $(function () {
-  $("#sensorId_01_short").change(function () {
+  $("#sensorId_01").change(function () {
     updateSelects();
   });
 
-  $("#sensorId_02_short").change(function () {
+  $("#sensorId_02").change(function () {
     updateSelects();
   });
 
   function updateSelects() {
-    var selectedValue1 = $("#sensorId_01_short").val();
-    var selectedValue2 = $("#sensorId_02_short").val();
+    var selectedValue1 = $("#sensorId_01").val();
+    var selectedValue2 = $("#sensorId_02").val();
 
     // 모든 option 태그 활성화
-    $("#sensorId_01_short option").prop("disabled", false);
-    $("#sensorId_02_short option").prop("disabled", false);
+    $("#sensorId_01 option").prop("disabled", false);
+    $("#sensorId_02 option").prop("disabled", false);
 
     // id가 "boundaryLine"인 옵션을 비활성화; 선택할 일이 없으므로 refresh할 필요 없는 코드 위치
-    $('#sensorId_01_short option[id = "boundaryLine"]').prop("disabled", true);
-    $('#sensorId_02_short option[id = "boundaryLine"]').prop("disabled", true);
+    $('#sensorId_01 option[id = "boundaryLine"]').prop("disabled", true);
+    $('#sensorId_02 option[id = "boundaryLine"]').prop("disabled", true);
 
     // value가 'sensorId_soil'인 옵션(Teros 21)을 비활성화
-    $('#sensorId_01_short option[value="sensorId_soil"]').prop(
-      "disabled",
-      true
-    );
-    $('#sensorId_02_short option[value="sensorId_soil"]').prop(
-      "disabled",
-      true
-    );
+    $('#sensorId_01 option[value="sensorId_soil"]').prop("disabled", true);
+    $('#sensorId_02 option[value="sensorId_soil"]').prop("disabled", true);
 
     // 1번 선택항목이 있을 때, 2번의 동일한 선택항목을 비활성화
     if (selectedValue1) {
-      $('#sensorId_02_short option[value="' + selectedValue1 + '"]').prop(
+      $('#sensorId_02 option[value="' + selectedValue1 + '"]').prop(
         "disabled",
         true
       );
 
       // 추가 기능 ******************************************************
       // value가 ""인 옵션을 활성화
-      $('#sensorId_01_short option[value=""]').prop("disabled", false);
-      $('#sensorId_02_short option[value=""]').prop("disabled", false);
+      $('#sensorId_01 option[value=""]').prop("disabled", false);
+      $('#sensorId_02 option[value=""]').prop("disabled", false);
       // ***************************************************************
     }
 
     // 2번 선택항목이 있을 때, 1번의 동일한 선택항목을 비활성화
     if (selectedValue2) {
-      $('#sensorId_01_short option[value="' + selectedValue2 + '"]').prop(
+      $('#sensorId_01 option[value="' + selectedValue2 + '"]').prop(
         "disabled",
         true
       );
 
       // 추가 기능 ******************************************************
       // value가 ""인 옵션을 활성화
-      $('#sensorId_01_short option[value=""]').prop("disabled", false);
-      $('#sensorId_02_short option[value=""]').prop("disabled", false);
+      $('#sensorId_01 option[value=""]').prop("disabled", false);
+      $('#sensorId_02 option[value=""]').prop("disabled", false);
       // ***************************************************************
     }
   }
@@ -107,8 +101,8 @@ $(function () {
   }
 
   // // Sensor 01과 Slave ID 01에 대한 설정
-  // setupSensorAndSlave("#sensorId_01_short", "#slaveId_01_short");
+  // setupSensorAndSlave("#sensorId_01", "#slaveId_01");
 
   // // Sensor 02와 Slave ID 02에 대한 설정
-  // setupSensorAndSlave("#sensorId_02_short", "#slaveId_02_short");
+  // setupSensorAndSlave("#sensorId_02", "#slaveId_02");
 });

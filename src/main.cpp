@@ -15,6 +15,10 @@
 
 #include <ModbusMaster.h>
 
+#include <ArduinoJson.h>
+
+#include "config.h"
+
 #define DebugSerial Serial
 HardwareSerial SerialPort(1); // use ESP32 UART1
 #define M1Serial Serial2
@@ -37,39 +41,56 @@ AsyncWebServer server(80);
 
 // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_1 = "mqttUsername";
-const char *PARAM_INPUT_2 = "mqttPw";
-const char *PARAM_INPUT_3 = "hostId";
-const char *PARAM_INPUT_4 = "port";
+const char *PARAM_INPUT_2 = "mqttPw2";
+// const char *PARAM_INPUT_3 = "hostId";
+// const char *PARAM_INPUT_4 = "port";
 const char *PARAM_INPUT_5 = "sensorId_01";
-const char *PARAM_INPUT_6 = "slaveId_01";
+// const char *PARAM_INPUT_6 = "slaveId_01";
 const char *PARAM_INPUT_7 = "sensorId_02";
-const char *PARAM_INPUT_8 = "slaveId_02";
+// const char *PARAM_INPUT_8 = "slaveId_02";
 const char *PARAM_INPUT_9 = "relayId";
-const char *PARAM_INPUT_10 = "slaveId_relay";
+// const char *PARAM_INPUT_10 = "slaveId_relay";
 
 // Variables to save values from HTML form
 String mqttUsername;
 String mqttPw;
-String hostId;
-String port;
+// String hostId;
+// String port;
 String sensorId_01;
-String slaveId_01;
+// String slaveId_01;
 String sensorId_02;
-String slaveId_02;
+// String slaveId_02;
 String relayId;
-String slaveId_relay;
+// String slaveId_relay;
 
 // File paths to save input values permanently
 const char *mqttUsernamePath = "/mqttUsername.txt";
 const char *mqttPwPath = "/mqttPw.txt";
-const char *hostIdPath = "/hostId.txt";
-const char *portPath = "/port.txt";
+// const char *hostIdPath = "/hostId.txt";
+// const char *portPath = "/port.txt";
 const char *sensorId_01Path = "/sensorId_01.txt";
-const char *slaveId_01Path = "/slaveId_01.txt";
+// const char *slaveId_01Path = "/slaveId_01.txt";
 const char *sensorId_02Path = "/sensorId_02.txt";
-const char *slaveId_02Path = "/slaveId_02.txt";
+// const char *slaveId_02Path = "/slaveId_02.txt";
 const char *relayIdPath = "/relayId.txt";
-const char *slaveId_relayPath = "/slaveId_relay.txt";
+// const char *slaveId_relayPath = "/slaveId_relay.txt";
+
+const char *_BROKER_IDPath = "_BROKER_ID.txt";
+const char *_BROKER_PORTPath = "_BROKER_PORT.txt";
+
+String _BROKER_ID;   // 수신된 Broker 주소 정보
+String _BROKER_PORT; // 수신된 Broker Port 정보
+
+// 릴레이, 센서코드 -> http 메시지로 전송할 정보
+String code_relay;
+String code_sen1;
+String code_sen2;
+
+// HTTP 통신 관련 변수
+char IPAddr[32];
+char sckInfo[128];
+char recvBuffer[700];
+int recvSize;
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -112,8 +133,8 @@ bool allows2ndSensorTaskDelay = false;
 bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
 
 // PPPOS, MQTT settings ***************************************************************************
-const char *ppp_user = "daonTest01";
-const char *ppp_pass = "daon7521";
+const char *ppp_user = "farmtalkSwitch";
+const char *ppp_pass = "farmtalk@123";
 
 String APN = "simplio.apn";
 TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
@@ -123,7 +144,7 @@ PubSubClient client(ppposClient);
 bool atMode = true;
 
 // Set SENSING_PERIOD *****************************************************************************
-#define SENSING_PERIOD_SEC 600 // 10 min
+#define SENSING_PERIOD_SEC 600 // 600s = 10 min
 #define PERIOD_CONSTANT 1000
 // ************************************************************************************************
 
@@ -171,7 +192,7 @@ const char *getStatus(int value);                        // bit를 topic으로 �
 /* EXT_ANT_ON 0 : Use an internal antenna.
  * EXT_ANT_ON 1 : Use an external antenna.
  */
-#define EXT_ANT_ON 0
+#define EXT_ANT_ON 1
 
 void extAntenna()
 {
@@ -184,7 +205,7 @@ void extAntenna()
 }
 
 // RS485 setting **********************************************************************************
-// #define SLAVE_ID 5
+// #define SLAVE_ID 1
 #define WRITE_START_ADDRESS 3 // 8ch 릴레이 전반 및 모든 릴레이 Delay 쓰기 전용
 #define WRITE_QUANTITY 4
 #define EXPAND_WRITE_START_ADDRESS 7 // 16ch 이상 릴레이 단순 on/off 쓰기 전용
@@ -246,14 +267,15 @@ void ModbusTask_Sensor_rain(void *pvParameters);  // 감우 센서 task
 void ModbusTask_Sensor_ec(void *pvParameters);    // 지온·지습·EC 센서 task
 void ModbusTask_Sensor_soil(void *pvParameters);  // 수분장력 센서 task
 
-// 각 센서별 Slave ID 지정
-int slaveId_th;
-int slaveId_tm100;
-int slaveId_rain;
-int slaveId_ec;
-int slaveId_soil;
+// 각 센서별 Slave ID 고정 지정
+const int slaveId_relay = 1;
+const int slaveId_th = 4;
+const int slaveId_tm100 = 10;
+const int slaveId_rain = 2;
+const int slaveId_ec = 30;
+const int slaveId_soil = 40;
 
-// 사용 안함
+// Deprecated
 struct SensorTask
 {
   const char *sensorId;         // sensorId: 센서 ID 문자열.
@@ -264,11 +286,14 @@ struct SensorTask
   bool *isSelectedModbusTask_Sensor; // 해당 센서가 선택되었는지 여부 bool 포인터 - loop에서 태스크 활성화변수 변경 시 조건으로 사용
 };
 
+// Deprecated
 void createSensorTask(const char *sensorId_01, int slaveId_01, const char *sensorId_02, int slaveId_02, const SensorTask *tasks, size_t taskCount);
 
+// Modbus Flow 함수
 void preTransmission();
 void postTransmission();
 
+// Debug Test
 String testMsg1 = "";
 String testMsg2 = "";
 String testMsg3 = "";
@@ -309,8 +334,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 5
-  modbus.begin(relayId.toInt(), SerialPort);
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -427,8 +452,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 5
-  modbus.begin(relayId.toInt(), SerialPort);
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -1662,7 +1687,8 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 
 bool isWMConfigDefined()
 {
-  if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || relayId == "" || slaveId_relay == "")
+  // if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || relayId == "" || slaveId_relay == "")
+  if (mqttUsername == "" || mqttPw == "" || relayId == "")
   {
     Serial.println("Undefined Form Submitted...");
     return false;
@@ -1717,36 +1743,36 @@ void setup()
   // Load values saved in SPIFFS
   mqttUsername = readFile(SPIFFS, mqttUsernamePath);
   mqttPw = readFile(SPIFFS, mqttPwPath);
-  hostId = readFile(SPIFFS, hostIdPath);
-  port = readFile(SPIFFS, portPath);
+  // hostId = readFile(SPIFFS, hostIdPath);
+  // port = readFile(SPIFFS, portPath);
   sensorId_01 = readFile(SPIFFS, sensorId_01Path);
-  slaveId_01 = readFile(SPIFFS, slaveId_01Path);
+  // slaveId_01 = readFile(SPIFFS, slaveId_01Path);
   sensorId_02 = readFile(SPIFFS, sensorId_02Path);
-  slaveId_02 = readFile(SPIFFS, slaveId_02Path);
+  // slaveId_02 = readFile(SPIFFS, slaveId_02Path);
   relayId = readFile(SPIFFS, relayIdPath);
-  slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
+  // slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
 
   // Debug Print
   DebugSerial.print("mqttUsername in SPIFFS: ");
   DebugSerial.println(mqttUsername);
   DebugSerial.print("mqttPw in SPIFFS: ");
   DebugSerial.println(mqttPw.length() == 0 ? "NO password." : "Password exists.");
-  DebugSerial.print("hostId in SPIFFS: ");
-  DebugSerial.println(hostId);
-  DebugSerial.print("port in SPIFFS: ");
-  DebugSerial.println(port);
+  // DebugSerial.print("hostId in SPIFFS: ");
+  // DebugSerial.println(hostId);
+  // DebugSerial.print("port in SPIFFS: ");
+  // DebugSerial.println(port);
   DebugSerial.print("sensorId_01 in SPIFFS: ");
   DebugSerial.println(sensorId_01);
-  DebugSerial.print("slaveId_01 in SPIFFS: ");
-  DebugSerial.println(slaveId_01);
+  // DebugSerial.print("slaveId_01 in SPIFFS: ");
+  // DebugSerial.println(slaveId_01);
   DebugSerial.print("sensorId_02 in SPIFFS: ");
   DebugSerial.println(sensorId_02);
-  DebugSerial.print("slaveId_02 in SPIFFS: ");
-  DebugSerial.println(slaveId_02);
+  // DebugSerial.print("slaveId_02 in SPIFFS: ");
+  // DebugSerial.println(slaveId_02);
   DebugSerial.print("relayId in SPIFFS: ");
   DebugSerial.println(relayId);
-  DebugSerial.print("slaveId_relay in SPIFFS: ");
-  DebugSerial.println(slaveId_relay);
+  // DebugSerial.print("slaveId_relay in SPIFFS: ");
+  // DebugSerial.println(slaveId_relay);
 
   DebugSerial.println();
 
@@ -1756,7 +1782,7 @@ void setup()
     // Connect to Wi-Fi network with SSID and pass
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("FarmtalkSwitch00-Manager", NULL);
+    WiFi.softAP("Daon-FarmtalkSwitch-Manager", NULL);
 
     IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
     Serial.print("AP IP address: ");
@@ -1792,24 +1818,24 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, mqttPwPath, mqttPw.c_str());
           }
-          // HTTP POST hostId value
-          if (p->name() == PARAM_INPUT_3)
-          {
-            hostId = p->value().c_str();
-            Serial.print("hostId set to: ");
-            Serial.println(hostId);
-            // Write file to save value
-            writeFile(SPIFFS, hostIdPath, hostId.c_str());
-          }
-          // HTTP POST port value
-          if (p->name() == PARAM_INPUT_4)
-          {
-            port = p->value().c_str();
-            Serial.print("port set to: ");
-            Serial.println(port);
-            // Write file to save value
-            writeFile(SPIFFS, portPath, port.c_str());
-          }
+          // // HTTP POST hostId value
+          // if (p->name() == PARAM_INPUT_3)
+          // {
+          //   hostId = p->value().c_str();
+          //   Serial.print("hostId set to: ");
+          //   Serial.println(hostId);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, hostIdPath, hostId.c_str());
+          // }
+          // // HTTP POST port value
+          // if (p->name() == PARAM_INPUT_4)
+          // {
+          //   port = p->value().c_str();
+          //   Serial.print("port set to: ");
+          //   Serial.println(port);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, portPath, port.c_str());
+          // }
           // HTTP POST sensorId_01 value
           if (p->name() == PARAM_INPUT_5)
           {
@@ -1819,15 +1845,15 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, sensorId_01Path, sensorId_01.c_str());
           }
-          // HTTP POST slaveId_01 value
-          if (p->name() == PARAM_INPUT_6)
-          {
-            slaveId_01 = p->value().c_str();
-            Serial.print("slaveId_01 set to: ");
-            Serial.println(slaveId_01);
-            // Write file to save value
-            writeFile(SPIFFS, slaveId_01Path, slaveId_01.c_str());
-          }
+          // // HTTP POST slaveId_01 value
+          // if (p->name() == PARAM_INPUT_6)
+          // {
+          //   slaveId_01 = p->value().c_str();
+          //   Serial.print("slaveId_01 set to: ");
+          //   Serial.println(slaveId_01);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, slaveId_01Path, slaveId_01.c_str());
+          // }
           // HTTP POST sensorId_02 value
           if (p->name() == PARAM_INPUT_7)
           {
@@ -1837,15 +1863,15 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, sensorId_02Path, sensorId_02.c_str());
           }
-          // HTTP POST slaveId_02 value
-          if (p->name() == PARAM_INPUT_8)
-          {
-            slaveId_02 = p->value().c_str();
-            Serial.print("slaveId_02 set to: ");
-            Serial.println(slaveId_02);
-            // Write file to save value
-            writeFile(SPIFFS, slaveId_02Path, slaveId_02.c_str());
-          }
+          // // HTTP POST slaveId_02 value
+          // if (p->name() == PARAM_INPUT_8)
+          // {
+          //   slaveId_02 = p->value().c_str();
+          //   Serial.print("slaveId_02 set to: ");
+          //   Serial.println(slaveId_02);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, slaveId_02Path, slaveId_02.c_str());
+          // }
           // HTTP POST relayId value
           if (p->name() == PARAM_INPUT_9)
           {
@@ -1855,15 +1881,15 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, relayIdPath, relayId.c_str());
           }
-          // HTTP POST slaveId_relay value
-          if (p->name() == PARAM_INPUT_10)
-          {
-            slaveId_relay = p->value().c_str();
-            Serial.print("slaveId_relay set to: ");
-            Serial.println(slaveId_relay);
-            // Write file to save value
-            writeFile(SPIFFS, slaveId_relayPath, slaveId_relay.c_str());
-          }
+          // // HTTP POST slaveId_relay value
+          // if (p->name() == PARAM_INPUT_10)
+          // {
+          //   slaveId_relay = p->value().c_str();
+          //   Serial.print("slaveId_relay set to: ");
+          //   Serial.println(slaveId_relay);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, slaveId_relayPath, slaveId_relay.c_str());
+          // }
           Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
       }
@@ -1920,6 +1946,295 @@ void setup()
     }
     delay(1000);
 
+    // 241018 http 메시지를 보내 브로커 정보 수신하는 로직 추가
+    // http 메시지 내용 사전 구성
+    _BROKER_ID = readFile(SPIFFS, _BROKER_IDPath);
+    _BROKER_PORT = readFile(SPIFFS, _BROKER_PORTPath);
+
+    // 릴레이 코드 설정
+    if (relayId == "relayId_4ch")
+    {
+      code_relay = "4";
+    }
+    else if (relayId == "relayId_8ch")
+    {
+      code_relay = "8";
+    }
+    else if (relayId == "relayId_16ch")
+    {
+      code_relay = "16";
+    }
+
+    // 센서 1 코드 설정
+    if (sensorId_01 == "")
+    {
+      code_sen1 = "0";
+    }
+    else if (sensorId_01 == "sensorId_th")
+    {
+      code_sen1 = "2";
+    }
+    else if (sensorId_01 == "sensorId_tm100")
+    {
+      code_sen1 = "1";
+    }
+    else if (sensorId_01 == "sensorId_rain")
+    {
+      code_sen1 = "3";
+    }
+    else if (sensorId_01 == "sensorId_ec")
+    {
+      code_sen1 = "4";
+    }
+    else if (sensorId_01 == "sensorId_soil")
+    {
+      code_sen1 = "5";
+    }
+
+    // 센서 2 코드 설정
+    if (sensorId_02 == "")
+    {
+      code_sen2 = "0";
+    }
+    else if (sensorId_02 == "sensorId_th")
+    {
+      code_sen2 = "2";
+    }
+    else if (sensorId_02 == "sensorId_tm100")
+    {
+      code_sen2 = "1";
+    }
+    else if (sensorId_02 == "sensorId_rain")
+    {
+      code_sen2 = "3";
+    }
+    else if (sensorId_02 == "sensorId_ec")
+    {
+      code_sen2 = "4";
+    }
+    else if (sensorId_02 == "sensorId_soil")
+    {
+      code_sen2 = "5";
+    }
+
+    //_HOST_ID 와 _PORT 둘중 하나라도 비어있을 때 http 메시지 송신
+    if (_BROKER_ID == "" || _BROKER_PORT == "")
+    {
+      int ipErrCount = 0;
+      /* Enter a DNS address to get an IP address */
+      while (1)
+      {
+
+        if (TYPE1SC.getIPAddr(_HOST_DOMAIN, IPAddr, sizeof(IPAddr)) == 0)
+        {
+          DebugSerial.print("Host IP Address : ");
+          DebugSerial.println(IPAddr);
+
+          break;
+        }
+        else
+        {
+          if (ipErrCount++ > 60)
+          {
+            DebugSerial.print("Cannot Connect to ");
+            DebugSerial.print(_HOST_DOMAIN);
+            DebugSerial.println("... ESP Restart.");
+            ESP.restart();
+          }
+          DebugSerial.print("IP Address Error!!!");
+          DebugSerial.print("; count: ");
+          DebugSerial.println(ipErrCount);
+        }
+        delay(2000);
+      }
+
+      // Use TCP Socket
+      /********************************/
+
+      /* 1 :TCP Socket Create ( 0:UDP, 1:TCP ) */
+      if (TYPE1SC.socketCreate(1, IPAddr, _HOST_PORT) == 0)
+      {
+        DebugSerial.println("TCP Socket Create!!!");
+      }
+
+    INFO:
+
+      /* 2 :TCP Socket Activation */
+      if (TYPE1SC.socketActivate() == 0)
+      {
+        DebugSerial.println("TCP Socket Activation!!!");
+#if defined(USE_LCD)
+        u8x8log.print("TCP Socket Activation!!!\n");
+#endif
+      }
+
+      if (TYPE1SC.socketInfo(sckInfo, sizeof(sckInfo)) == 0)
+      {
+        DebugSerial.print("Socket Info : ");
+        DebugSerial.println(sckInfo);
+#if defined(USE_LCD)
+        u8x8log.print("Socket Info : ");
+        u8x8log.print(sckInfo);
+        u8x8log.print("\n");
+#endif
+
+        if (strcmp(sckInfo, "ACTIVATED"))
+        {
+          delay(3000);
+          goto INFO;
+        }
+      }
+
+      /* 3-1 :TCP Socket Send Data */
+      String data = "GET /api/Auth/Create?";
+      data += "id=" + mqttUsername + "&";
+      data += "pwd=" + mqttPw + "&";
+      data += "relay=" + code_relay + "&"; // 릴레이 wifi manager 입력값 바탕으로 구분
+      data += "sen1=" + code_sen1 + "&";
+      data += "sen2=" + code_sen2;
+
+      data += " HTTP/1.1\r\n";
+      data += "Host: " + String(IPAddr) + "\r\n";
+      data += "Connection: keep-alive\r\n\r\n";
+
+      // String data = "https://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0;
+
+      if (TYPE1SC.socketSend(data.c_str()) == 0)
+      {
+        DebugSerial.print("[HTTP Send] >> ");
+        DebugSerial.println(data);
+#if defined(USE_LCD)
+        u8x8log.print("[HTTP Send] >> ");
+        u8x8log.print(data);
+        u8x8log.print("\n");
+#endif
+      }
+      else
+      {
+        DebugSerial.println("Send Fail!!!");
+#if defined(USE_LCD)
+        u8x8log.print("Send Fail!!!\n");
+#endif
+      }
+
+      /* 4-1 :TCP Socket Recv Data */
+      if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+      {
+        DebugSerial.print("[RecvSize] >> ");
+        DebugSerial.println(recvSize);
+        DebugSerial.print("[Recv] >> ");
+        DebugSerial.println(recvBuffer);
+#if defined(USE_LCD)
+        u8x8log.print("[RecvSize] >> ");
+        u8x8log.print(recvSize);
+        u8x8log.print("\n");
+        u8x8log.print("[Recv] >> ");
+        u8x8log.print(recvBuffer);
+        u8x8log.print("\n");
+#endif
+
+        // http 메시지 처리
+        // 1. 헤더와 바디 분리
+        const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+        if (jsonStart == NULL)
+        {
+          Serial.println("Cannot find Http Header...");
+        }
+        else
+        {
+          // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+          jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+
+          // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+          const char *jsonPart = strchr(jsonStart, '{'); // JSON 시작 위치 찾기
+
+          // JSON 파싱
+          StaticJsonDocument<256> doc;
+          DeserializationError error = deserializeJson(doc, jsonPart);
+
+          // 파싱 오류 확인
+          if (error)
+          {
+            Serial.print(F("deserializeJson() Failed: "));
+            Serial.println(error.f_str());
+            return;
+          }
+
+          // "result", "host", "port" 값 추출
+          bool result = doc["result"];
+          const char *host = doc["host"];
+          int port = doc["port"];
+
+          // 결과 출력
+          Serial.print("result: ");
+          Serial.println(result ? "true" : "false");
+          Serial.print("host: ");
+          Serial.println(host);
+          Serial.print("port: ");
+          Serial.println(port);
+
+          // 수신된 정보를 MQTT 변수에 할당
+          _BROKER_ID = host;
+          _BROKER_PORT = port;
+
+          // ESP32 Flash Memory에 기록
+          writeFile(SPIFFS, _BROKER_IDPath, _BROKER_ID.c_str());
+          writeFile(SPIFFS, _BROKER_PORTPath, _BROKER_PORT.c_str());
+
+          // 디버깅
+          DebugSerial.print("_BROKER_ID in _BROKER_IDPath: ");
+          DebugSerial.println(readFile(SPIFFS, _BROKER_IDPath));
+          DebugSerial.print("_BROKER_PORT in _BROKER_PORTPath: ");
+          DebugSerial.println(readFile(SPIFFS, _BROKER_PORTPath));
+        }
+      }
+      else
+      {
+        DebugSerial.println("Recv Fail!!!");
+#if defined(USE_LCD)
+        u8x8log.print("Recv Fail!!!\n");
+#endif
+      }
+
+      /* 5 :TCP Socket DeActivation */
+      if (TYPE1SC.socketDeActivate() == 0)
+      {
+        DebugSerial.println("TCP Socket DeActivation!!!");
+#if defined(USE_LCD)
+        u8x8log.print("TCP Socket DeActivation!!!\n");
+#endif
+      }
+
+      if (TYPE1SC.socketInfo(sckInfo, sizeof(sckInfo)) == 0)
+      {
+        DebugSerial.print("Socket Info : ");
+        DebugSerial.println(sckInfo);
+#if defined(USE_LCD)
+        u8x8log.print("Socket Info : ");
+        u8x8log.print(sckInfo);
+        u8x8log.print("\n");
+#endif
+      }
+
+      /* 6 :TCP Socket DeActivation */
+      if (TYPE1SC.socketClose() == 0)
+      {
+        DebugSerial.println("TCP Socket Close!!!");
+#if defined(USE_LCD)
+        u8x8log.print("TCP Socket Close!!!\n");
+#endif
+      }
+
+      /* 7 :Detach Network */
+      if (TYPE1SC.setCFUN(0) == 0)
+      {
+        DebugSerial.println("detach Network!!!");
+#if defined(USE_LCD)
+        u8x8log.print("detach Network!!!\n");
+#endif
+      }
+    }
+
     int rssi, rsrp, rsrq, sinr;
     // AT커맨드로 네트워크 정보 획득 (3회)
     for (int i = 0; i < 3; i++)
@@ -1965,9 +2280,10 @@ void setup()
 
     /* PPPOS Setup */
     PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, (char *)ppp_user, (char *)ppp_pass); // PPPOS 설정
-    client.setServer(hostId.c_str(), port.toInt());                                     // MQTT 클라이언트를 설정
-                                                                                        // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
-    client.setCallback(callback);                                                       // mqtt 메시지 수신 콜백 등록
+    // 본 서버에서 broker 주소와 port 정보를 미리 받아오는 코드 필요
+    client.setServer(_BROKER_ID.c_str(), _BROKER_PORT.toInt()); // MQTT 클라이언트를 설정
+                                                                // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
+    client.setCallback(callback);                               // mqtt 메시지 수신 콜백 등록
     DebugSerial.println("Starting PPPOS...");
 
     if (startPPPOS())
@@ -1979,7 +2295,7 @@ void setup()
       DebugSerial.println("Starting PPPOS... Failed");
     }
 
-    if (relayId == "relayId_8ch")
+    if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
     {
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
@@ -2013,11 +2329,12 @@ void setup()
     if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
     {
       if (sensorId_01 == "sensorId_th")
-        slaveId_th = slaveId_01.toInt();
-
+      {
+        // slaveId_th = slaveId_01.toInt();
+      }
       else if (sensorId_02 == "sensorId_th")
       {
-        slaveId_th = slaveId_02.toInt();
+        // slaveId_th = slaveId_02.toInt();
         allows2ndSensorTaskDelay = true;
       }
 
@@ -2034,11 +2351,12 @@ void setup()
     if (sensorId_01 == "sensorId_tm100" || sensorId_02 == "sensorId_tm100")
     {
       if (sensorId_01 == "sensorId_tm100")
-        slaveId_tm100 = slaveId_01.toInt();
-
+      {
+        // slaveId_tm100 = slaveId_01.toInt();
+      }
       else if (sensorId_02 == "sensorId_tm100")
       {
-        slaveId_tm100 = slaveId_02.toInt();
+        // slaveId_tm100 = slaveId_02.toInt();
         allows2ndSensorTaskDelay = true;
       }
 
@@ -2055,11 +2373,13 @@ void setup()
     if (sensorId_01 == "sensorId_rain" || sensorId_02 == "sensorId_rain")
     {
       if (sensorId_01 == "sensorId_rain")
-        slaveId_rain = slaveId_01.toInt();
+      {
+        // slaveId_rain = slaveId_01.toInt();
+      }
 
       else if (sensorId_02 == "sensorId_rain")
       {
-        slaveId_rain = slaveId_02.toInt();
+        // slaveId_rain = slaveId_02.toInt();
         allows2ndSensorTaskDelay = true;
       }
 
@@ -2076,11 +2396,12 @@ void setup()
     if (sensorId_01 == "sensorId_ec" || sensorId_02 == "sensorId_ec")
     {
       if (sensorId_01 == "sensorId_ec")
-        slaveId_ec = slaveId_01.toInt();
-
+      {
+        // slaveId_ec = slaveId_01.toInt();
+      }
       else if (sensorId_02 == "sensorId_ec")
       {
-        slaveId_ec = slaveId_02.toInt();
+        // slaveId_ec = slaveId_02.toInt();
         allows2ndSensorTaskDelay = true;
       }
 
@@ -2097,11 +2418,12 @@ void setup()
     if (sensorId_01 == "sensorId_soil" || sensorId_02 == "sensorId_soil")
     {
       if (sensorId_01 == "sensorId_soil")
-        slaveId_soil = slaveId_01.toInt();
-
+      {
+        // slaveId_soil = slaveId_01.toInt();
+      }
       else if (sensorId_02 == "sensorId_soil")
       {
-        slaveId_soil = slaveId_02.toInt();
+        // slaveId_soil = slaveId_02.toInt();
         allows2ndSensorTaskDelay = true;
       }
 

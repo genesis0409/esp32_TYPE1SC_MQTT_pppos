@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>팜톡스위치 매니저</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="./favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" type="text/css" href="style.css" />
+
+    <!-- jQuery 라이브러리 로드 -->
+    <script src="./jquery-1.11.1.min.js" defer></script>
+    <!-- 외부 JavaScript 파일 로드 -->
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="topnav">
+      <h1>팜톡 스위치 매니저</h1>
+    </div>
+    <div class="content">
+      <div class="card-grid">
+        <div class="card">
+          <form action="/" method="POST">
+            <p>
+              <hr class="hr-text" data-content="사용자 설정">
+              <label for="mqttUsername">ID</label>
+              <input
+                type="text"
+                id="mqttUsername"
+                name="mqttUsername"
+                value=""
+                required
+                autofocus
+              />
+              <br />
+              <label for="mqttPw">PW</label>
+              <input
+                type="password"
+                id="mqttPw"
+                name="mqttPw"
+                value=""
+                required
+              /><img
+                src="eye.svg"
+                style="vertical-align: middle"
+                class="toggle-password"
+                id="toggle-password"
+                alt="Show/Hide Password"
+              /><br />
+              <br />
+              <!-- <hr class="hr-text" data-content="Broker Settings">
+              <label for="hostId">Host</label>
+              <input
+                type="text"
+                id="hostId"
+                name="hostId"
+                value="broker.hivemq.com"
+                required
+              />
+              <br />
+              <label for="port">Port</label>
+              <input
+                type="number"
+                id="port"
+                name="port"
+                value="1883"
+                required
+              /><br />
+              <br /> -->
+              <hr class="hr-text" data-content="부착 기기">
+
+              <label for="relayId_short" id="label-relayId">Relay</label>
+              <select id="relayId_short" name="relayId" class="comboBox">
+                <!-- 릴레이는 Modbus ID: 1 -->
+                <option value="relayId_4ch" disabled>4 channels</option>
+                <option value="relayId_8ch">8 channels</option>
+                <option value="relayId_16ch">16 channels</option>
+              </select>
+              <br />
+
+              <hr class="hr-text" data-content="">
+
+              <!-- <label for="slaveId_relay_short" class="slaveId"
+                >Slave ID(relay)</label
+              >
+              <input
+                type="number"
+                id="slaveId_relay_short"
+                name="slaveId_relay"
+                value="5"
+                required
+              /> -->
+
+              <label for="sensorId_01_short">Sensor 01</label>
+              <select
+                id="sensorId_01_short"
+                name="sensorId_01"
+                class="comboBox"
+              >
+                <option value="">선택하지 않음</option>
+                <option id="boundaryLine" disabled>
+                  -------------------------------
+                </option>
+                <option value="sensorId_tm100">온습도 센서 (TM-100)</option>
+                <option value="sensorId_rain">감우 센서 (CNT-WJ24)</option>
+                <option value="sensorId_ec">지온·지습·EC 센서 (RK520-02)</option>
+                <option value="sensorId_th">온습도 센서 (THT-02)</option>
+                <option value="sensorId_soil" disabled>수분장력 센서 (TEROS 21)</option>
+              </select>
+              <br />
+              <!-- <label for="slaveId_01_short" class="slaveId">Slave ID(01)</label>
+              <input
+                type="number"
+                id="slaveId_01_short"
+                name="slaveId_01"
+              /> -->
+
+              <!-- <hr class="hr-text" data-content=""> -->
+
+              <label for="sensorId_02_short">Sensor 02</label>
+              <select
+                id="sensorId_02_short"
+                name="sensorId_02"
+                class="comboBox"
+              >
+                <option value="">선택하지 않음</option>
+                <option id="boundaryLine" disabled>
+                  -------------------------------
+                </option>
+                <option value="sensorId_tm100">온습도 센서 (TM-100)</option>
+                <option value="sensorId_rain">감우 센서 (CNT-WJ24)</option>
+                <option value="sensorId_ec">지온·지습·EC 센서 (RK520-02)</option>
+                <option value="sensorId_th">온습도 센서 (THT-02)</option>
+                <option value="sensorId_soil" disabled>수분장력 센서 (TEROS 21)</option>
+              </select>
+              <br />
+              <!-- <label for="slaveId_02_short" class="slaveId">Slave ID(02)</label>
+              <input
+                type="number"
+                id="slaveId_02_short"
+                name="slaveId_02"
+              /> -->
+
+              <hr class="hr-text" data-content="">
+
+              <input type="submit" value="Submit" />
+            </p>
+          </form>
+        </div>
+      </div>
+      <div>
+        <img
+          src="logo_kor.png"
+          class="logo-daon"
+          id="logo-daon"
+          name="logo-daon"
+        />
+      </div>
+    </div>
+  </body>
+</html>

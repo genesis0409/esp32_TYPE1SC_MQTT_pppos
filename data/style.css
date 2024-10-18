@@ -1,68 +1,105 @@
 html {
+  width: 100%;
+  height: 100vh;
   font-family: Arial, Helvetica, sans-serif;
-  display: inline-block;
-  text-align: center;
+  background: #2f6ccf;
 }
 
 h1 {
   font-size: 1.8rem;
   color: white;
-}
-
-p {
-  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 20px;
 }
 
 .topnav {
   overflow: hidden;
-  background-color: #0a1128;
+}
+.topnav h1 {
+  font-size: 1.8rem;
+  color: white;
+  text-align: center;
+  margin-top: 20px;
 }
 
-body {
+body,
+div,
+dl,
+dt,
+dd,
+ul,
+ol,
+li,
+h1,
+h2,
+h3,
+h4,
+h5,
+form,
+fieldset,
+p,
+button,
+input {
   margin: 0;
+  padding: 0;
+  letter-spacing: 0;
+}
+input,
+select {
+  vertical-align: middle;
 }
 
-.content {
-  padding: 5%;
+.wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 .card-grid {
-  max-width: 800px;
-  margin: 0 auto;
-  display: grid;
-  grid-gap: 2rem;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  position: relative;
+  padding: 5%;
 }
 
-.card {
-  background-color: white;
-  box-shadow: 2px 2px 12px 1px rgba(140, 140, 140, 0.5);
+.card-cont {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  margin-bottom: 10px;
 }
-
-.card-title {
-  font-size: 1.2rem;
-  font-weight: bold;
-  color: #034078;
+.card-cont dl {
+  display: flex;
+  margin-bottom: 10px;
+}
+.card-cont dl dt {
+  width: 22%;
+  color: #fff;
+  margin: 0;
+  padding: 0;
+  line-height: 2.2;
+}
+.card-cont dl dd {
+  margin-right: 10px;
+}
+.card-cont dl dd img {
+  padding-top: 5px;
 }
 
 input[type="submit"] {
   border: none;
-  color: #fefcfb;
-  background-color: #034078;
-  padding: 15px 15px;
-  margin: 20px 0px 10px;
+  color: #2d2b2b;
+  background-color: #fff;
+  padding: 10px;
   text-align: center;
   text-decoration: none;
-  display: inline-block;
-  font-size: 16px;
-  width: 100px;
-  /* margin-right: 10px; */
-  border-radius: 4px;
+  font-size: 14px;
+  border-radius: 50px;
   transition-duration: 0.4s;
+  width: 100%;
 }
 
 input[type="submit"]:hover {
-  background-color: #1282a2;
+  color: #fff;
+  background-color: #05327b;
 }
 
 input[type="text"],
@@ -70,71 +107,23 @@ input[type="number"],
 input[type="email"],
 input[type="url"],
 select {
-  width: 40%;
-  padding: 12px 20px;
-  margin: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  margin: 0;
   display: inline-block;
   border: 1px solid #ccc;
   border-radius: 4px;
   box-sizing: border-box;
 }
 
-#mqttPw,
 input[type="password"] {
-  width: 37%;
-  padding: 12px 20px;
-  margin: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  margin: 0;
   display: inline-block;
   border: 1px solid #ccc;
   border-radius: 4px;
   box-sizing: border-box;
-}
-
-input[id*="short"],
-select {
-  width: 40%;
-  padding: 12px 20px;
-  margin: 10px;
-  display: inline-block;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-sizing: border-box;
-}
-
-label {
-  font-size: 1.2rem;
-  display: inline-block;
-  width: 12.5%;
-}
-.value {
-  font-size: 1.2rem;
-  color: #1282a2;
-}
-.state {
-  font-size: 1.2rem;
-  color: #1282a2;
-}
-button {
-  border: none;
-  color: #fefcfb;
-  padding: 15px 32px;
-  text-align: center;
-  font-size: 16px;
-  width: 100px;
-  border-radius: 4px;
-  transition-duration: 0.4s;
-}
-.button-on {
-  background-color: #034078;
-}
-.button-on:hover {
-  background-color: #1282a2;
-}
-.button-off {
-  background-color: #858585;
-}
-.button-off:hover {
-  background-color: #252524;
 }
 
 .hr-text {
@@ -145,12 +134,13 @@ button {
   color: black;
   text-align: center;
   height: 1.5em;
-  opacity: 0.5;
+  opacity: 0.8;
+  margin-bottom: 30px;
   &:before {
     content: "";
     /* use the linear-gradient for the fading effect
     use a solid background color for a solid bar */
-    background: linear-gradient(to right, transparent, #818078, transparent);
+    background: linear-gradient(to right, transparent, #fff, transparent);
     position: absolute;
     left: 0;
     top: 50%;
@@ -166,31 +156,21 @@ button {
     padding: 0 0.5em;
     line-height: 1.5em;
     /* this is really the only tricky part, you need to specify the background color of the container element... */
-    color: #818078;
-    background-color: #fcfcfa;
+    color: #05327b;
+    border-radius: 5px;
+    background-color: #fff;
   }
 }
-
+/* 
 .toggle-password {
   position: relative;
   transform: translateY(-10%);
   cursor: pointer;
   width: 24px;
   height: 24px;
-}
-
-.logo-daon {
-  width: 300px;
-  height: auto;
-  border: none;
-  margin-top: 4em;
-}
+} */
 
 select {
-  margin-bottom: 10px;
-  margin-top: 10px;
-  /* font-family: cursive, sans-serif; */
-  /* text-align: center; */
   text-align-last: center;
   outline: 0;
   background: #034078;
@@ -198,4 +178,38 @@ select {
   /* border: 1px solid crimson; */
   padding: 7px;
   border-radius: 9px;
+}
+
+.setting {
+  color: #fff;
+}
+.setting img {
+  width: 100%;
+}
+.setting div {
+  margin: 20px 5%;
+}
+
+.bottom-btn {
+  position: fixed;
+  bottom: 30px;
+  width: 90%;
+}
+
+/* .add {
+} */
+.add p img {
+  width: 100%;
+}
+.add_con {
+  text-align: center;
+  color: #fff;
+  margin: 100px 0;
+}
+.add_con a {
+  color: #fff;
+  text-decoration: none;
+}
+.add_con a img {
+  padding-bottom: 10px;
 }
