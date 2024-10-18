@@ -27,7 +27,7 @@
         <h1>장비설정</h1>
       </div>
       <div class="card-grid">
-        <form action="/" method="POST">
+        <form id="submitForm" action="/" method="POST">
           <div class="card-cont">
             <hr class="hr-text" data-content="사용자 설정" />
             <dl>
@@ -65,11 +65,10 @@
                   value=""
                   required
                 />
+                <p id="pwMessage" style="color: orange"></p>
+                <!-- 비밀번호 상태 메시지 표시 -->
               </dd>
             </dl>
-            <p id="error-message" style="color: red; display: none">
-              비밀번호가 일치하지 않습니다
-            </p>
           </div>
           <div class="card-cont">
             <hr class="hr-text" data-content="부착 기기" />
