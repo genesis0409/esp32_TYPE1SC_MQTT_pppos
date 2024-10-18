@@ -101,18 +101,22 @@ void writeFile(fs::FS &fs, const char *path, const char *message); // Write file
 bool isWMConfigDefined();                                          // Is Wifi Manager Configuration Defined?
 bool allowsLoop = false;
 
-float temp = 0;
-float humi = 0;
-float ec = 0;
-bool isRainy = false;
-float soilPotential = 0;
+float temp = 0;          // 온도/1
+float humi = 0;          // 습도/2
+bool isRainy = false;    // 감우/4
+float ec = 0;            // EC/12
+float soilTemp = 0;      // 지온/17
+float soilHumi = 0;      // 지습/14
+float soilPotential = 0; // 수분장력/15
 bool errBit;
 
 // 센서 value 발행 허용 여부
 bool allowsPublishTEMP = false;
 bool allowsPublishHUMI = false;
-bool allowsPublishEC = false;
 bool allowsPublishRAIN = false;
+bool allowsPublishEC = false;
+bool allowsPublishSoilT = false;
+bool allowsPublishSoilH = false;
 bool allowsPublishSoilP = false;
 
 // modbus 오류 시 센서 result 발행 허용 여부
@@ -151,24 +155,28 @@ bool atMode = true;
 #define QOS 1
 
 // MQTT Topic *************************************************************************************
-// char *SUB_TOPIC = "type1sc/control/farmtalkSwitch00/#"; // 구독 주제
-// char *PUB_TOPIC = "type1sc/update/farmtalkSwitch00";    // 발행 주제
+// char *SUB_TOPIC = "type1sc/farmtalkSwitch00/control/#"; // 구독 주제
+// char *PUB_TOPIC = "type1sc/farmtalkSwitch00/update";    // 발행 주제
 
-#define MQTT_SERVER "broker.hivemq.com" // hostId로 대체
+#define MQTT_SERVER "broker.hivemq.com" // _BROKER_ID로 대체
 
-String SUB_TOPIC = "type1sc/control";       // 구독 주제: type1sc/control/farmtalkSwitch00/r-; msg: on/off/refresh
-String PUB_TOPIC = "type1sc/update";        // 발행 주제: type1sc/update/farmtalkSwitch00;
-String PUB_TOPIC_SENSOR = "type1sc/sensor"; // 센서 발행 주제 type1sc/sensor/farmtalkSwitch00/temp+humi+ec+rain+soilP; msg: value
+// 241019 TOPIC 구조 개편
+String SUB_TOPIC = "type1sc";        // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/refresh
+String PUB_TOPIC = "type1sc";        // 발행 주제: type1sc/farmtalkSwitch00/update;
+String PUB_TOPIC_SENSOR = "type1sc"; // 센서 발행 주제 type1sc/farmtalkSwitch00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
 
-String WILL_TOPIC = "type1sc/disconnect";
-String WILL_MESSAGE = "DISCONNECTED.";
+String CONTROL_TOPIC = "/control"; // /control
+String UPDATE_TOPIC = "/update";   // /update
+String SENSOR_TOPIC = "/sensor";   // /sensor
+
+String WILL_TOPIC = "/disconnect";     // /disconnect
+String WILL_MESSAGE = "DISCONNECTED."; // /DISCONNECTED.
 
 #define MULTI_LEVEL_WILDCARD "/#"
 #define SINGLE_LEVEL_WILDCARD "/+"
 
-String clientId;     // == mqttUsername: farmtalkSwitch00
-String DEVICE_TOPIC; // /farmtalkSwitch00
-int PUB_TOPIC_length;
+String DEVICE_TOPIC;  // /farmtalkSwitch00
+int PUB_TOPIC_length; // "type1sc/farmtalkSwitch00/update"의 길이 정보
 
 String payloadBuffer = ""; // 메시지 스플릿을 위한 페이로드 버퍼 변수
 String suffix = "";        // 추가할 문자열을 설정
@@ -178,9 +186,9 @@ String suffix = "";        // 추가할 문자열을 설정
 #define BIT_OFF 0
 #define SHIFT_CONSTANT 8
 
-void publishNewTopic();
-void publishSensorData();
-void publishSensorResult();
+void publishNewTopic();           // 릴레이 제어 후 제어완료 토픽/메시지 발행
+void publishSensorData();         // 센서값 발행
+void publishModbusSensorResult(); // 센서 modbus 오류 시 결과 발행
 
 String *Split(String sData, char cSeparator, int *scnt); // 문자열 파싱
 String *rStr = nullptr;                                  // 파싱된 문자열 저장변수
@@ -192,7 +200,7 @@ const char *getStatus(int value);                        // bit를 topic으로 �
 /* EXT_ANT_ON 0 : Use an internal antenna.
  * EXT_ANT_ON 1 : Use an external antenna.
  */
-#define EXT_ANT_ON 1
+#define EXT_ANT_ON 0
 
 void extAntenna()
 {
@@ -641,7 +649,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
     else
     {
       allowsPublishSensor_result_th = true;
-      publishSensorResult();
+      publishModbusSensorResult();
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
@@ -714,7 +722,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
     else
     {
       allowsPublishSensor_result_tm100 = true;
-      publishSensorResult();
+      publishModbusSensorResult();
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
@@ -803,7 +811,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
     else
     {
       allowsPublishSensor_result_rain = true;
-      publishSensorResult();
+      publishModbusSensorResult();
     }
 
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -862,15 +870,15 @@ void ModbusTask_Sensor_ec(void *pvParameters)
 
     if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
     {
-      temp = float(modbus.getResponseBuffer(0) / 10.00F);
-      humi = float(modbus.getResponseBuffer(1) / 10.00F);
+      soilTemp = float(modbus.getResponseBuffer(0) / 10.00F);
+      soilHumi = float(modbus.getResponseBuffer(1) / 10.00F);
       ec = float(modbus.getResponseBuffer(2) / 1000.00F);
 
       // Get response data from sensor
       // allowsModbusTask_Sensor_ec = false;
 
-      allowsPublishTEMP = true;
-      allowsPublishHUMI = true;
+      allowsPublishSoilT = true;
+      allowsPublishSoilH = true;
       allowsPublishEC = true;
       publishSensorData();
     }
@@ -878,7 +886,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
     else
     {
       allowsPublishSensor_result_ec = true;
-      publishSensorResult();
+      publishModbusSensorResult();
     }
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
@@ -1253,8 +1261,8 @@ void callback(char *topic, byte *payload, unsigned int length)
 
     if (allowsPublishStatus)
     {
-      // topic: "type1sc/update/farmtalkSwitch00
-      client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
+      // topic: "type1sc/farmtalkSwitch00/update
+      client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
       allowsPublishStatus = false;
     }
   }
@@ -1337,16 +1345,16 @@ void reconnect()
   {
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
-    // if (client.connect(clientId.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
-    if (client.connect(clientId.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (WILL_TOPIC + DEVICE_TOPIC).c_str(), QOS, 0, (clientId + " " + WILL_MESSAGE).c_str()))
+    // if (client.connect(mqttUsername.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
+    if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + " " + WILL_MESSAGE).c_str()))
     {
       DebugSerial.println("connected");
 
-      client.subscribe((SUB_TOPIC + DEVICE_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
+      client.subscribe((SUB_TOPIC + DEVICE_TOPIC + CONTROL_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
 
       // Once connected, publish an announcement...
-      client.publish((PUB_TOPIC + DEVICE_TOPIC).c_str(), (clientId + " Ready.").c_str()); // 준비되었음을 알림(publish)
-                                                                                          // ... and resubscribe
+      client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), (mqttUsername + " Ready.").c_str()); // 준비되었음을 알림(publish)
+                                                                                                             // ... and resubscribe
     }
     else // 실패 시 재연결 시도
     {
@@ -1367,10 +1375,10 @@ void publishNewTopic()
 
   // 새로운 문자열을 저장할 메모리 할당
   char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
-  strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_TOPIC).c_str());                  // PUB_TOPIC의 내용을 새로운 문자열에 복사
+  strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str());   // PUB_TOPIC의 내용을 새로운 문자열에 복사
   strcat(new_PUB_TOPIC, suffix.c_str());                                      // suffix를 새로운 문자열에 추가
 
-  // topic: "type1sc/update/farmtalkSwitch00" + "r-"
+  // topic: "type1sc/farmtalkSwitch00/update" + "r-"
   client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
   // DebugSerial.print("Publish Topic: ");
   // DebugSerial.println(new_PUB_TOPIC);
@@ -1379,7 +1387,7 @@ void publishNewTopic()
 
   // DebugSerial.println(suffix);
   // DebugSerial.println(suffix_length);
-  // DebugSerial.println(PUB_TOPIC + DEVICE_TOPIC);
+  // DebugSerial.println(PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC);
   // DebugSerial.println(PUB_TOPIC_length);
 
   // DebugSerial.println(new_PUB_TOPIC);
@@ -1391,14 +1399,14 @@ void publishNewTopic()
 
 void publishSensorData()
 {
-  // topic: "type1sc/sensor/farmtalkSwitch00/@"
+  // topic: "type1sc/farmtalkSwitch00/sensor/@"
   // 온도
   if (allowsPublishTEMP)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/temp").c_str(), String(temp).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/1").c_str(), String(temp).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "temp");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/1");
     // DebugSerial.println("] ");
     // DebugSerial.print(temp);
     // DebugSerial.println("℃");
@@ -1409,10 +1417,10 @@ void publishSensorData()
   // 습도
   if (allowsPublishHUMI)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/humi").c_str(), String(humi).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/2").c_str(), String(humi).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "humi");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/2");
     // DebugSerial.println("] ");
     // DebugSerial.print(humi);
     // DebugSerial.println("%");
@@ -1423,10 +1431,10 @@ void publishSensorData()
   // 감우
   if (allowsPublishRAIN)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/rain").c_str(), String(isRainy ? 1 : 0).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/4").c_str(), String(isRainy ? 1 : 0).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "rain");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/4");
     // DebugSerial.println("] ");
     // DebugSerial.println(isRainy ? 1 : 0);
 
@@ -1436,10 +1444,10 @@ void publishSensorData()
   // EC
   if (allowsPublishEC)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/ec").c_str(), String(ec).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/12").c_str(), String(ec).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "ec");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/12");
     // DebugSerial.println("] ");
     // DebugSerial.print(ec);
     // DebugSerial.println("mS/cm");
@@ -1447,13 +1455,40 @@ void publishSensorData()
     allowsPublishEC = false;
   }
 
+  // 지온
+  if (allowsPublishSoilT)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/17").c_str(), String(soilTemp).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/17");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(soilTemp);
+    // DebugSerial.println("℃");
+
+    allowsPublishSoilT = false;
+  }
+  // 지습
+  if (allowsPublishSoilH)
+  {
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/14").c_str(), String(soilHumi).c_str());
+
+    // DebugSerial.print("Publish: [");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/14");
+    // DebugSerial.println("] ");
+    // DebugSerial.print(soilHumi);
+    // DebugSerial.println("%");
+
+    allowsPublishSoilH = false;
+  }
+
   // 수분장력
   if (allowsPublishSoilP)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/soilPotential").c_str(), String(soilPotential).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/15").c_str(), String(soilPotential).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + "soilPotential");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/15");
     // DebugSerial.println("] ");
     // DebugSerial.print(soilPotential);
     // DebugSerial.println("kPa");
@@ -1462,35 +1497,35 @@ void publishSensorData()
   }
 }
 
-void publishSensorResult()
+void publishModbusSensorResult()
 {
   if (allowsPublishSensor_result_th)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
     allowsPublishSensor_result_th = false;
     modbus_Sensor_result_th = -1;
   }
   if (allowsPublishSensor_result_tm100)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
     allowsPublishSensor_result_tm100 = false;
     modbus_Sensor_result_tm100 = -1;
   }
   if (allowsPublishSensor_result_rain)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
     allowsPublishSensor_result_rain = false;
     modbus_Sensor_result_rain = -1;
   }
   if (allowsPublishSensor_result_ec)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
     allowsPublishSensor_result_ec = false;
     modbus_Sensor_result_ec = -1;
   }
   if (allowsPublishSensor_result_soil)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + "/SensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
     allowsPublishSensor_result_soil = false;
     modbus_Sensor_result_soil = -1;
   }
@@ -1702,7 +1737,7 @@ void getTime()
   char szTime[32];
   if (TYPE1SC.getCCLK(szTime, sizeof(szTime)) == 0)
   {
-    // client.publish((PUB_TOPIC + DEVICE_TOPIC + "/time").c_str(), szTime);
+    // client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/time").c_str(), szTime);
     // DebugSerial.print("Time : ");
     // DebugSerial.println(szTime);
   }
@@ -1916,9 +1951,8 @@ void setup()
     SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
 
     // Topic 관련 변수 초기화
-    clientId = mqttUsername;
-    DEVICE_TOPIC = "/" + clientId;
-    PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_TOPIC).c_str()); // pub_topic의 길이 계산
+    DEVICE_TOPIC = "/" + mqttUsername;
+    PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str()); // pub_topic의 길이 계산
 
     DebugSerial.println("TYPE1SC Module Start!!!");
 
@@ -2148,8 +2182,10 @@ void setup()
           // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
           const char *jsonPart = strchr(jsonStart, '{'); // JSON 시작 위치 찾기
 
-          // JSON 파싱
-          StaticJsonDocument<256> doc;
+          // JSON 파싱을 위한 JsonDocument 생성
+          JsonDocument doc; // Deprecated 경고 없이 최신 방식으로 사용
+
+          // JSON 데이터 파싱
           DeserializationError error = deserializeJson(doc, jsonPart);
 
           // 파싱 오류 확인
