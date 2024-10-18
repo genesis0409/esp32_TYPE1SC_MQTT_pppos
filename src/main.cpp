@@ -603,7 +603,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
 
   /* Serial1 Initialization */
   // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 1(기기 자체 물리적 커스텀 가능)
+  // Modbus slave ID 4(기기 자체 물리적 커스텀 가능)
   modbus.begin(slaveId_th, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
