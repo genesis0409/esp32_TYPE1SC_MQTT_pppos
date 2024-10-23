@@ -75,11 +75,11 @@ const char *sensorId_02Path = "/sensorId_02.txt";
 const char *relayIdPath = "/relayId.txt";
 // const char *slaveId_relayPath = "/slaveId_relay.txt";
 
-const char *_BROKER_IDPath = "_BROKER_ID.txt";
-const char *_BROKER_PORTPath = "_BROKER_PORT.txt";
+const char *BROKER_IDPath = "/BROKER_ID.txt";
+const char *BROKER_PORTPath = "/BROKER_PORT.txt";
 
-String _BROKER_ID;   // 수신된 Broker 주소 정보
-String _BROKER_PORT; // 수신된 Broker Port 정보
+String BROKER_ID;   // 수신된 Broker 주소 정보
+String BROKER_PORT; // 수신된 Broker Port 정보
 
 // 릴레이, 센서코드 -> http 메시지로 전송할 정보
 String code_relay;
@@ -91,6 +91,7 @@ char IPAddr[32];
 char sckInfo[128];
 char recvBuffer[700];
 int recvSize;
+bool httpRecvFailed = false;
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -158,7 +159,7 @@ bool atMode = true;
 // char *SUB_TOPIC = "type1sc/farmtalkSwitch00/control/#"; // 구독 주제
 // char *PUB_TOPIC = "type1sc/farmtalkSwitch00/update";    // 발행 주제
 
-#define MQTT_SERVER "broker.hivemq.com" // _BROKER_ID로 대체
+#define MQTT_SERVER "broker.hivemq.com" // BROKER_ID로 대체
 
 // 241019 TOPIC 구조 개편
 String SUB_TOPIC = "type1sc";        // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/refresh
@@ -1981,10 +1982,7 @@ void setup()
     delay(1000);
 
     // 241018 http 메시지를 보내 브로커 정보 수신하는 로직 추가
-    // http 메시지 내용 사전 구성
-    _BROKER_ID = readFile(SPIFFS, _BROKER_IDPath);
-    _BROKER_PORT = readFile(SPIFFS, _BROKER_PORTPath);
-
+    // http로 보낼 릴레이/센서 코드 설정
     // 릴레이 코드 설정
     if (relayId == "relayId_4ch")
     {
@@ -2050,9 +2048,18 @@ void setup()
     {
       code_sen2 = "5";
     }
+    sensorId_01 = readFile(SPIFFS, sensorId_01Path);
+    // http 연결 정보 사전 구성
+    BROKER_ID = readFile(SPIFFS, BROKER_IDPath);
+    BROKER_PORT = readFile(SPIFFS, BROKER_PORTPath);
+
+    DebugSerial.print("BROKER_ID: ");
+    DebugSerial.println(BROKER_ID);
+    DebugSerial.print("BROKER_PORT: ");
+    DebugSerial.println(BROKER_PORT);
 
     //_HOST_ID 와 _PORT 둘중 하나라도 비어있을 때 http 메시지 송신
-    if (_BROKER_ID == "" || _BROKER_PORT == "")
+    if (BROKER_ID == "" || BROKER_PORT == "")
     {
       int ipErrCount = 0;
       /* Enter a DNS address to get an IP address */
@@ -2173,6 +2180,7 @@ void setup()
         if (jsonStart == NULL)
         {
           Serial.println("Cannot find Http Header...");
+          httpRecvFailed = true;
         }
         else
         {
@@ -2210,23 +2218,26 @@ void setup()
           Serial.println(port);
 
           // 수신된 정보를 MQTT 변수에 할당
-          _BROKER_ID = host;
-          _BROKER_PORT = port;
+          BROKER_ID = host;
+          BROKER_PORT = port;
 
           // ESP32 Flash Memory에 기록
-          writeFile(SPIFFS, _BROKER_IDPath, _BROKER_ID.c_str());
-          writeFile(SPIFFS, _BROKER_PORTPath, _BROKER_PORT.c_str());
+          writeFile(SPIFFS, BROKER_IDPath, BROKER_ID.c_str());
+          writeFile(SPIFFS, BROKER_PORTPath, BROKER_PORT.c_str());
 
           // 디버깅
-          DebugSerial.print("_BROKER_ID in _BROKER_IDPath: ");
-          DebugSerial.println(readFile(SPIFFS, _BROKER_IDPath));
-          DebugSerial.print("_BROKER_PORT in _BROKER_PORTPath: ");
-          DebugSerial.println(readFile(SPIFFS, _BROKER_PORTPath));
+          DebugSerial.print("BROKER_ID in BROKER_IDPath: ");
+          DebugSerial.println(readFile(SPIFFS, BROKER_IDPath));
+          DebugSerial.print("BROKER_PORT in BROKER_PORTPath: ");
+          DebugSerial.println(readFile(SPIFFS, BROKER_PORTPath));
+
+          httpRecvFailed = false;
         }
       }
       else
       {
         DebugSerial.println("Recv Fail!!!");
+        httpRecvFailed = true;
 #if defined(USE_LCD)
         u8x8log.print("Recv Fail!!!\n");
 #endif
@@ -2269,6 +2280,12 @@ void setup()
         u8x8log.print("detach Network!!!\n");
 #endif
       }
+    }
+
+    if (httpRecvFailed)
+    {
+      DebugSerial.println("*** [HTTP Failed...] ESP Restart. ***");
+      ESP.restart();
     }
 
     int rssi, rsrp, rsrq, sinr;
@@ -2317,9 +2334,9 @@ void setup()
     /* PPPOS Setup */
     PPPOS_init(GSM_TX, GSM_RX, GSM_BR, GSM_SERIAL, (char *)ppp_user, (char *)ppp_pass); // PPPOS 설정
     // 본 서버에서 broker 주소와 port 정보를 미리 받아오는 코드 필요
-    client.setServer(_BROKER_ID.c_str(), _BROKER_PORT.toInt()); // MQTT 클라이언트를 설정
-                                                                // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
-    client.setCallback(callback);                               // mqtt 메시지 수신 콜백 등록
+    client.setServer(BROKER_ID.c_str(), BROKER_PORT.toInt()); // MQTT 클라이언트를 설정
+                                                              // PPPOS를 통해 인터넷에 연결되어 MQTT 브로커와 통신할 수 있게 준비
+    client.setCallback(callback);                             // mqtt 메시지 수신 콜백 등록
     DebugSerial.println("Starting PPPOS...");
 
     if (startPPPOS())
