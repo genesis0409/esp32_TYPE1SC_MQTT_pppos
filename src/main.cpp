@@ -894,6 +894,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   {
     // RK520-02
     modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 
     if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
     {
@@ -989,6 +990,8 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();                           // 현재 Tick 시간
   const TickType_t xWakePeriod = 10 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 sec
 
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
   while (true)
   {
     // 경과한 Tick을 기준으로 시간 업데이트
@@ -1010,6 +1013,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
 void log_print_task(void *pvParameters)
 {
   char logMsg[LOG_MSG_SIZE];
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (true)
   {
@@ -1046,14 +1050,14 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
-  DebugSerial.println("] ");
+  DebugSerial.print("] ");
 
-  // // payload 반복 출력
-  // for (int i = 0; i < length; i++)
-  // {
-  //   DebugSerial.print((char)payload[i]);
-  // }
-  // DebugSerial.println();
+  // payload 반복 출력
+  for (int i = 0; i < length; i++)
+  {
+    DebugSerial.print((char)payload[i]);
+  }
+  DebugSerial.println();
 
   // 아직 사용 안하는 기능 240508
   // payload에 'on', 'off', 'dis'문자열이 포함되어 있는지 확인
@@ -1629,30 +1633,35 @@ void publishModbusSensorResult()
   if (allowsPublishSensor_result_th)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
+    // DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
     allowsPublishSensor_result_th = false;
     modbus_Sensor_result_th = -1;
   }
   if (allowsPublishSensor_result_tm100)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
+    // DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
     allowsPublishSensor_result_tm100 = false;
     modbus_Sensor_result_tm100 = -1;
   }
   if (allowsPublishSensor_result_rain)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
+    // DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
     allowsPublishSensor_result_rain = false;
     modbus_Sensor_result_rain = -1;
   }
   if (allowsPublishSensor_result_ec)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
+    // DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
     allowsPublishSensor_result_ec = false;
     modbus_Sensor_result_ec = -1;
   }
   if (allowsPublishSensor_result_soil)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
+    // DebugSerial.println("ModbusSensorError_soil result: " + String(modbus_Sensor_result_soil));
     allowsPublishSensor_result_soil = false;
     modbus_Sensor_result_soil = -1;
   }
@@ -2521,7 +2530,6 @@ void setup()
       return;
     }
 
-    // 미사용 - pppos와 충돌
     // NTP 동기화 태스크 생성
     xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
