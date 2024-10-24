@@ -14,8 +14,12 @@
 #include <AsyncTCP.h>
 
 #include <ModbusMaster.h>
-
 #include <ArduinoJson.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h" // 로깅 시스템을 별도로 분리하기 위한 freertos 큐
+#include "apps/sntp/sntp.h" //Simplified Network Time Protocol 관련 함수를 사용
 
 #include "config.h"
 
@@ -91,7 +95,25 @@ char IPAddr[32];
 char sckInfo[128];
 char recvBuffer[700];
 int recvSize;
-bool httpRecvFailed = false;
+bool httpRecvOK = false;           // http 메시지 수신 여부
+uint8_t httpTryCount = 0;          // http 통신 시도 횟수
+const uint8_t httpTryLimit = 3;    // http 통신 시도 한계 횟수
+bool farmtalkServerResult = false; // 서버 발 사용자 등록 결과
+
+void getTime(); // 시간 정보 업데이트 함수
+
+// NTP 시간 관련 변수
+static const char *TIME_TAG = "[SNTP]";
+static const char *TIME_TAG_ESP = "[ESP]";
+
+time_t current_time;          // NTP 동기화 후 저장되는 기준 시간
+TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
+
+static QueueHandle_t logQueue; // 로그 메시지를 저장할 큐
+#define LOG_QUEUE_SIZE 10      // 큐 크기 설정
+#define LOG_MSG_SIZE 128       // 로그 메시지 크기 설정
+
+void enqueue_log(const char *message); // 로그 메시지를 큐에 추가하는 함수
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -275,6 +297,10 @@ void ModbusTask_Sensor_tm100(void *pvParameters); // TM100 task
 void ModbusTask_Sensor_rain(void *pvParameters);  // 감우 센서 task
 void ModbusTask_Sensor_ec(void *pvParameters);    // 지온·지습·EC 센서 task
 void ModbusTask_Sensor_soil(void *pvParameters);  // 수분장력 센서 task
+
+void TimeTask_NTPSync(void *pvParameters);         // NTP 서버와 시간을 동기화하는 task
+void TimeTask_ESP_Update_Time(void *pvParameters); // ESP32 내부 타이머로 시간 업데이트하는 태스크
+void log_print_task(void *pvParameters);           // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
 
 // 각 센서별 Slave ID 고정 지정
 const int slaveId_relay = 1;
@@ -896,6 +922,106 @@ void ModbusTask_Sensor_ec(void *pvParameters)
 
 void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
 
+// NTP 서버와 시간을 동기화하는 태스크
+void TimeTask_NTPSync(void *pvParameters)
+{
+  time_t now = 0;             // 현재 시간 저장
+  struct tm timeInfo = {0};   // 시간 형식 구조체: 연, 월, 일, 시, 분, 초 등
+  int retry = 0;              // NTP 서버와의 동기화 시도 횟수 카운트
+  const int retry_count = 10; // 최대 재시도 횟수
+  char logMsg[LOG_MSG_SIZE];
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = 3600 * 24 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 Day
+
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  // ==== Get time from NTP server =====
+  do
+  {
+    snprintf(logMsg, LOG_MSG_SIZE, "%s Initializing SNTP for One-Time Sync", TIME_TAG);
+    enqueue_log(logMsg);
+
+    // NTP 서버 설정
+    configTime(9 * 3600, 0, "pool.ntp.org"); // GMT+09:00
+
+    // 시간 동기화 대기
+    time_t now = 0;
+    time(&now);                   // 현재 시간을 now 변수에 저장
+    localtime_r(&now, &timeInfo); // 이를 localtime_r() 함수로 timeInfo 구조체로 변환
+    retry = 0;
+    while ((timeInfo.tm_year < (2016 - 1900)) && (++retry < retry_count)) // 시스템 시간이 2016년 이전일 경우(즉, 시간이 아직 설정되지 않았을 때) 최대 retry_count만큼 재시도
+    {
+      snprintf(logMsg, LOG_MSG_SIZE, "%s Waiting for system time to be set... (%d/%d)", TIME_TAG, retry, retry_count);
+      enqueue_log(logMsg);
+
+      vTaskDelay(2000 / portTICK_PERIOD_MS); // 2초 대기: NTP 서버에서 시간을 얻는 데 시간 소요
+      time(&now);
+      localtime_r(&now, &timeInfo);
+    }
+
+    // 동기화 성공 여부 확인
+    if (retry < retry_count)
+    {
+      // asctime(&timeInfo): 구조체 내부 시간정보를 읽기 쉽게 문자열 형태로 변환 "%a %b %d %H:%M:%S %Y\n"
+      snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, asctime(&timeInfo));
+      enqueue_log(logMsg);
+
+      // 동기화된 시간 저장
+      current_time = now;
+      lastSyncTickCount = xTaskGetTickCount(); // Tick 기반 시간 저장
+    }
+    else
+    {
+      snprintf(logMsg, LOG_MSG_SIZE, "%s ERROR OBTAINING TIME", TIME_TAG);
+      enqueue_log(logMsg);
+    }
+
+    // 주기적으로 1시간마다 다시 동기화
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
+  } while (true);
+}
+
+// ESP32 내부 타이머로 시간 업데이트하는 태스크
+void TimeTask_ESP_Update_Time(void *pvParameters)
+{
+  char logMsg[LOG_MSG_SIZE];
+  TickType_t xLastWakeTime = xTaskGetTickCount();                           // 현재 Tick 시간
+  const TickType_t xWakePeriod = 10 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 sec
+
+  while (true)
+  {
+    // 경과한 Tick을 기준으로 시간 업데이트
+    TickType_t ticksElapsed = xTaskGetTickCount() - lastSyncTickCount;               // 동기화 이후 경과한 Tick 계산
+    time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
+
+    // 현재 시간 정보 로깅
+    struct tm timeinfo;
+    localtime_r(&updated_time, &timeinfo);
+    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeinfo));
+    enqueue_log(logMsg);
+
+    // 10초마다 정확하게 대기
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
+  }
+}
+
+// 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
+void log_print_task(void *pvParameters)
+{
+  char logMsg[LOG_MSG_SIZE];
+
+  while (true)
+  {
+    // 큐에서 로그 메시지 받기
+    if (xQueueReceive(logQueue, &logMsg, portMAX_DELAY) == pdPASS)
+    {
+      // 로그 메시지 시리얼 포트로 출력
+      DebugSerial.println(logMsg);
+    }
+  }
+}
+
 void preTransmission()
 {
   // 전송 방식
@@ -920,14 +1046,14 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
-  DebugSerial.print("] ");
+  DebugSerial.println("] ");
 
-  // payload 반복 출력
-  for (int i = 0; i < length; i++)
-  {
-    DebugSerial.print((char)payload[i]);
-  }
-  DebugSerial.println();
+  // // payload 반복 출력
+  // for (int i = 0; i < length; i++)
+  // {
+  //   DebugSerial.print((char)payload[i]);
+  // }
+  // DebugSerial.println();
 
   // 아직 사용 안하는 기능 240508
   // payload에 'on', 'off', 'dis'문자열이 포함되어 있는지 확인
@@ -968,9 +1094,9 @@ void callback(char *topic, byte *payload, unsigned int length)
   int cnt = 0;
   rStr = Split(payloadBuffer, '&', &cnt);
 
-  DebugSerial.println(rStr[0]); // on/off
-  DebugSerial.println(rStr[1]); // delayTime
-  DebugSerial.println(isNumeric(rStr[1]));
+  // DebugSerial.println(rStr[0]); // on/off
+  // DebugSerial.println(rStr[1]); // delayTime
+  // DebugSerial.println(isNumeric(rStr[1]));
 
   if (isNumeric(rStr[1]))
   {
@@ -1274,15 +1400,15 @@ void callback(char *topic, byte *payload, unsigned int length)
     // 아무것도 하지 않음
   }
 
-  DebugSerial.print("readingStatusRegister: ");
-  DebugSerial.println(readingStatusRegister[0]);
-  DebugSerial.print("writingRegisters[2]: ");
-  DebugSerial.println(writingRegisters[2]);
+  // DebugSerial.print("readingStatusRegister: ");
+  // DebugSerial.println(readingStatusRegister[0]);
+  // DebugSerial.print("writingRegisters[2]: ");
+  // DebugSerial.println(writingRegisters[2]);
 
-  DebugSerial.print("writingRegisters_Expand[1]: ");
-  DebugSerial.println(writingRegisters_Expand[1]);
-  DebugSerial.print("writingRegisters_Expand[2]: ");
-  DebugSerial.println(writingRegisters_Expand[2]);
+  // DebugSerial.print("writingRegisters_Expand[1]: ");
+  // DebugSerial.println(writingRegisters_Expand[1]);
+  // DebugSerial.print("writingRegisters_Expand[2]: ");
+  // DebugSerial.println(writingRegisters_Expand[2]);
 
   // DebugSerial.println(testMsg1);
   // DebugSerial.println(testMsg2);
@@ -1313,8 +1439,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   rStr[0] = "";
   rStr[1] = "";
   free(p);
-  DebugSerial.println("free memory");
-  DebugSerial.println();
+  // DebugSerial.println("free memory");
+  // DebugSerial.println();
 }
 
 // PPPOS 연결 시작
@@ -1726,7 +1852,7 @@ bool isWMConfigDefined()
   // if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || relayId == "" || slaveId_relay == "")
   if (mqttUsername == "" || mqttPw == "" || relayId == "")
   {
-    Serial.println("Undefined Form Submitted...");
+    DebugSerial.println("Undefined Form Submitted...");
     return false;
   }
   return true;
@@ -1735,17 +1861,26 @@ bool isWMConfigDefined()
 void getTime()
 {
   /* Get Time (GMT, (+36/4) ==> Korea +9hour) */
-  char szTime[32];
-  if (TYPE1SC.getCCLK(szTime, sizeof(szTime)) == 0)
+  char szTimeString[32]; // 시간 정보 저장 변수
+  if (TYPE1SC.getCCLK(szTimeString, sizeof(szTimeString)) == 0)
   {
     // client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/time").c_str(), szTime);
-    // DebugSerial.print("Time : ");
-    // DebugSerial.println(szTime);
   }
   else
   {
-    strncpy(szTime, "nullTime", sizeof(szTime) - 1);
-    szTime[sizeof(szTime) - 1] = '\0'; // Ensure null-termination
+    strncpy(szTimeString, "nullTime", sizeof(szTimeString) - 1);
+    szTimeString[sizeof(szTimeString) - 1] = '\0'; // Ensure null-termination
+  }
+  // DebugSerial.print("Time : ");
+  // DebugSerial.println(szTime);
+}
+
+// 로그 메시지를 큐에 추가하는 함수
+void enqueue_log(const char *message)
+{
+  if (xQueueSend(logQueue, message, portMAX_DELAY) != pdPASS)
+  {
+    DebugSerial.println("Failed to Enqueue Log Message");
   }
 }
 
@@ -2065,7 +2200,6 @@ void setup()
       /* Enter a DNS address to get an IP address */
       while (1)
       {
-
         if (TYPE1SC.getIPAddr(_HOST_DOMAIN, IPAddr, sizeof(IPAddr)) == 0)
         {
           DebugSerial.print("Host IP Address : ");
@@ -2126,7 +2260,6 @@ void setup()
         }
       }
 
-      /* 3-1 :TCP Socket Send Data */
       String data = "GET /api/Auth/Create?";
       data += "id=" + mqttUsername + "&";
       data += "pwd=" + mqttPw + "&";
@@ -2140,108 +2273,124 @@ void setup()
 
       // String data = "https://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0;
 
-      if (TYPE1SC.socketSend(data.c_str()) == 0)
+      // http 수신 성공적이면 타지 않음; 3회 시도 후 실패 시 공장초기화
+      while (!httpRecvOK && httpTryCount++ < httpTryLimit)
       {
-        DebugSerial.print("[HTTP Send] >> ");
-        DebugSerial.println(data);
-#if defined(USE_LCD)
-        u8x8log.print("[HTTP Send] >> ");
-        u8x8log.print(data);
-        u8x8log.print("\n");
-#endif
-      }
-      else
-      {
-        DebugSerial.println("Send Fail!!!");
-#if defined(USE_LCD)
-        u8x8log.print("Send Fail!!!\n");
-#endif
-      }
-
-      /* 4-1 :TCP Socket Recv Data */
-      if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
-      {
-        DebugSerial.print("[RecvSize] >> ");
-        DebugSerial.println(recvSize);
-        DebugSerial.print("[Recv] >> ");
-        DebugSerial.println(recvBuffer);
-#if defined(USE_LCD)
-        u8x8log.print("[RecvSize] >> ");
-        u8x8log.print(recvSize);
-        u8x8log.print("\n");
-        u8x8log.print("[Recv] >> ");
-        u8x8log.print(recvBuffer);
-        u8x8log.print("\n");
-#endif
-
-        // http 메시지 처리
-        // 1. 헤더와 바디 분리
-        const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
-        if (jsonStart == NULL)
+        /* 3-1 :TCP Socket Send Data */
+        if (TYPE1SC.socketSend(data.c_str()) == 0)
         {
-          Serial.println("Cannot find Http Header...");
-          httpRecvFailed = true;
+          DebugSerial.print("[HTTP Send] >> ");
+          DebugSerial.println(data);
+#if defined(USE_LCD)
+          u8x8log.print("[HTTP Send] >> ");
+          u8x8log.print(data);
+          u8x8log.print("\n");
+#endif
         }
         else
         {
-          // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
-          jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
-
-          // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
-          const char *jsonPart = strchr(jsonStart, '{'); // JSON 시작 위치 찾기
-
-          // JSON 파싱을 위한 JsonDocument 생성
-          JsonDocument doc; // Deprecated 경고 없이 최신 방식으로 사용
-
-          // JSON 데이터 파싱
-          DeserializationError error = deserializeJson(doc, jsonPart);
-
-          // 파싱 오류 확인
-          if (error)
-          {
-            Serial.print(F("deserializeJson() Failed: "));
-            Serial.println(error.f_str());
-            return;
-          }
-
-          // "result", "host", "port" 값 추출
-          bool result = doc["result"];
-          const char *host = doc["host"];
-          int port = doc["port"];
-
-          // 결과 출력
-          Serial.print("result: ");
-          Serial.println(result ? "true" : "false");
-          Serial.print("host: ");
-          Serial.println(host);
-          Serial.print("port: ");
-          Serial.println(port);
-
-          // 수신된 정보를 MQTT 변수에 할당
-          BROKER_ID = host;
-          BROKER_PORT = port;
-
-          // ESP32 Flash Memory에 기록
-          writeFile(SPIFFS, BROKER_IDPath, BROKER_ID.c_str());
-          writeFile(SPIFFS, BROKER_PORTPath, BROKER_PORT.c_str());
-
-          // 디버깅
-          DebugSerial.print("BROKER_ID in BROKER_IDPath: ");
-          DebugSerial.println(readFile(SPIFFS, BROKER_IDPath));
-          DebugSerial.print("BROKER_PORT in BROKER_PORTPath: ");
-          DebugSerial.println(readFile(SPIFFS, BROKER_PORTPath));
-
-          httpRecvFailed = false;
-        }
-      }
-      else
-      {
-        DebugSerial.println("Recv Fail!!!");
-        httpRecvFailed = true;
+          DebugSerial.println("Send Fail!!!");
 #if defined(USE_LCD)
-        u8x8log.print("Recv Fail!!!\n");
+          u8x8log.print("Send Fail!!!\n");
 #endif
-      }
+        }
+
+        /* 4-1 :TCP Socket Recv Data */
+        if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+        {
+          DebugSerial.print("[RecvSize] >> ");
+          DebugSerial.println(recvSize);
+          DebugSerial.print("[Recv] >> ");
+          DebugSerial.println(recvBuffer);
+#if defined(USE_LCD)
+          u8x8log.print("[RecvSize] >> ");
+          u8x8log.print(recvSize);
+          u8x8log.print("\n");
+          u8x8log.print("[Recv] >> ");
+          u8x8log.print(recvBuffer);
+          u8x8log.print("\n");
+#endif
+
+          // http 메시지 처리
+          // 1. 헤더와 바디 분리
+          const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+          if (jsonStart == NULL)
+          {
+            DebugSerial.println("Cannot find Http Header...");
+            httpRecvOK = false;
+          }
+          else // JSON 구분 성공 시 파싱
+          {
+            // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+            jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+
+            // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+            const char *jsonPart = strchr(jsonStart, '{'); // JSON 시작 위치 찾기
+
+            // JSON 파싱을 위한 JsonDocument 생성
+            JsonDocument doc; // Deprecated 경고 없이 최신 방식으로 사용
+
+            // JSON 데이터 파싱
+            DeserializationError error = deserializeJson(doc, jsonPart);
+
+            // 파싱 오류 확인; 여기서 아마 HTTP OK 2XX 아닌 메시지는 걸러질듯
+            if (error)
+            {
+              DebugSerial.print(F("deserializeJson() Failed: "));
+              DebugSerial.println(error.f_str());
+              httpRecvOK = false;
+            }
+            else
+            {
+              // "result", "host", "port" 값 추출
+              farmtalkServerResult = doc["result"];
+              const char *host = doc["host"];
+              int port = doc["port"];
+
+              // 결과 출력
+              DebugSerial.print("result: ");
+              DebugSerial.println(farmtalkServerResult ? "true" : "false");
+              DebugSerial.print("host: ");
+              DebugSerial.println(host);
+              DebugSerial.print("port: ");
+              DebugSerial.println(port);
+
+              // result가 false 이면 사용자 등록이 실패한 것
+              if (farmtalkServerResult == false)
+              {
+                continue;
+              }
+              else // 사용자 등록 성공
+              {
+                // 수신된 정보를 MQTT 변수에 할당
+                BROKER_ID = host;
+                BROKER_PORT = port;
+
+                // ESP32 Flash Memory에 기록
+                writeFile(SPIFFS, BROKER_IDPath, BROKER_ID.c_str());
+                writeFile(SPIFFS, BROKER_PORTPath, BROKER_PORT.c_str());
+
+                // 디버깅
+                DebugSerial.print("BROKER_ID in BROKER_IDPath: ");
+                DebugSerial.println(readFile(SPIFFS, BROKER_IDPath));
+                DebugSerial.print("BROKER_PORT in BROKER_PORTPath: ");
+                DebugSerial.println(readFile(SPIFFS, BROKER_PORTPath));
+
+                httpRecvOK = true;
+              }
+            } // if json error
+          } // if jsonStart null
+        } // if TYPE1SC.socketRecv()
+        else
+        {
+          httpRecvOK = false;
+          DebugSerial.println("Recv Fail!!!");
+#if defined(USE_LCD)
+          u8x8log.print("Recv Fail!!!\n");
+#endif
+        }
+        delay(2000); // 2초 후 재시도
+      } // while (최대 3회)
 
       /* 5 :TCP Socket DeActivation */
       if (TYPE1SC.socketDeActivate() == 0)
@@ -2280,13 +2429,29 @@ void setup()
         u8x8log.print("detach Network!!!\n");
 #endif
       }
-    }
 
-    if (httpRecvFailed)
-    {
-      DebugSerial.println("*** [HTTP Failed...] ESP Restart. ***");
-      ESP.restart();
-    }
+      // http 메시지 수신에 문제가 있거나
+      //  result가 false면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+      if (httpRecvOK == false || farmtalkServerResult == false)
+      {
+        DebugSerial.println("[ALERT] Server Returns result: false...");
+        DebugSerial.println("Running Factory Reset...");
+
+        SPIFFS.remove(mqttUsernamePath);
+        SPIFFS.remove(mqttPwPath);
+        SPIFFS.remove(sensorId_01Path);
+        SPIFFS.remove(sensorId_02Path);
+        SPIFFS.remove(relayIdPath);
+        SPIFFS.remove(BROKER_IDPath);
+        SPIFFS.remove(BROKER_PORTPath);
+
+        DebugSerial.println("Factory Reset Complete.");
+
+        DebugSerial.println("ESP will restart.");
+        delay(1000);
+        ESP.restart();
+      }
+    } // if (BROKER_ID == "" || BROKER_PORT == "")
 
     int rssi, rsrp, rsrq, sinr;
     // AT커맨드로 네트워크 정보 획득 (3회)
@@ -2347,6 +2512,24 @@ void setup()
     {
       DebugSerial.println("Starting PPPOS... Failed");
     }
+
+    // 로그 큐 생성
+    logQueue = xQueueCreate(LOG_QUEUE_SIZE, sizeof(char) * LOG_MSG_SIZE);
+    if (logQueue == NULL)
+    {
+      Serial.println("Failed to create log queue");
+      return;
+    }
+
+    // 미사용 - pppos와 충돌
+    // NTP 동기화 태스크 생성
+    xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
+
+    // 내부 타이머로 시간 업데이트하는 태스크 생성
+    xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 2048, NULL, 8, NULL);
+
+    // 로그 출력 태스크 생성
+    xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 8, NULL);
 
     if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
     {
