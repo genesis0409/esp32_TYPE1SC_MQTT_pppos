@@ -82,6 +82,7 @@ bool led_Relay4 = RELAY_OFF;
 
 // NTP 시간 관련 변수
 static const char *TIME_TAG = "[SNTP]";
+static const char *TIME_TAG_ESP = "[ESP]";
 
 time_t current_time;          // NTP 동기화 후 저장되는 기준 시간
 TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
@@ -106,7 +107,7 @@ void TimeTask_NTPSync(void *pvParameters)
   char logMsg[LOG_MSG_SIZE];
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = 3600 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 Hour
+  const TickType_t xWakePeriod = 60 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 Hour
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
@@ -172,7 +173,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
     // 현재 시간 정보 로깅
     struct tm timeinfo;
     localtime_r(&updated_time, &timeinfo);
-    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG, asctime(&timeinfo));
+    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeinfo));
     enqueue_log(logMsg);
 
     // 10초마다 정확하게 대기
