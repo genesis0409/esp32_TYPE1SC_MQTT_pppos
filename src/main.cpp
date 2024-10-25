@@ -386,7 +386,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
       if (rStr[0] == "refresh")
       {
         // relay status
-        modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY);
+        modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
@@ -504,7 +504,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
       if (rStr[0] == "refresh")
       {
         // relay status
-        modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY);
+        modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
@@ -653,12 +653,21 @@ void ModbusTask_Sensor_th(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(12000 / portTICK_PERIOD_MS);
 
   do
   {
+    int retryCount = 0;
+    const int maxRetries = 5;                               // 최대 재시도 횟수
+    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
     // THT-02
-    modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
+    while (modbus_Sensor_result_th != modbus.ku8MBSuccess && retryCount < maxRetries)
+    {
+      retryCount++;
+      vTaskDelay(retryDelay);                                      // 재시도 전에 500ms 대기
+      modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03, 재시도
+    }
 
     if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
     {
@@ -671,6 +680,8 @@ void ModbusTask_Sensor_th(void *pvParameters)
       allowsPublishTEMP = true;
       allowsPublishHUMI = true;
       publishSensorData();
+
+      modbus_Sensor_result_th = -1;
     }
     // 오류 처리
     else
@@ -725,12 +736,21 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(12000 / portTICK_PERIOD_MS);
 
   do
   {
+    int retryCount = 0;
+    const int maxRetries = 5;                               // 최대 재시도 횟수
+    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
     // TM-100
-    modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
+    while (modbus_Sensor_result_tm100 != modbus.ku8MBSuccess && retryCount < maxRetries)
+    {
+      retryCount++;
+      vTaskDelay(retryDelay);                                       // 재시도 전에 500ms 대기
+      modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04, 재시도
+    }
 
     if (modbus_Sensor_result_tm100 == modbus.ku8MBSuccess)
     {
@@ -744,6 +764,8 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
       allowsPublishTEMP = true;
       allowsPublishHUMI = true;
       publishSensorData();
+
+      modbus_Sensor_result_tm100 = -1; // 초기화
     }
     // 오류 처리
     else
@@ -798,12 +820,21 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(12000 / portTICK_PERIOD_MS);
 
   do
   {
+    int retryCount = 0;
+    const int maxRetries = 5;                               // 최대 재시도 횟수
+    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
     // CNT-WJ24
-    modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
+    while (modbus_Sensor_result_rain != modbus.ku8MBSuccess && retryCount < maxRetries)
+    {
+      retryCount++;
+      vTaskDelay(retryDelay);                                         // 재시도 전에 500ms 대기
+      modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04, 재시도
+    }
 
     if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
     {
@@ -833,6 +864,8 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 
       allowsPublishRAIN = true;
       publishSensorData();
+
+      modbus_Sensor_result_rain = -1; // 초기화
     }
     // 오류 처리
     else
@@ -888,13 +921,21 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(12000 / portTICK_PERIOD_MS);
 
   do
   {
+    int retryCount = 0;
+    const int maxRetries = 5;                               // 최대 재시도 횟수
+    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
     // RK520-02
-    modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    while (modbus_Sensor_result_ec != modbus.ku8MBSuccess && retryCount < maxRetries)
+    {
+      retryCount++;
+      vTaskDelay(retryDelay);                                      // 재시도 전에 500ms 대기
+      modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03, 재시도
+    }
 
     if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
     {
@@ -909,6 +950,8 @@ void ModbusTask_Sensor_ec(void *pvParameters)
       allowsPublishSoilH = true;
       allowsPublishEC = true;
       publishSensorData();
+
+      modbus_Sensor_result_ec = -1; // 초기화
     }
     // 오류 처리
     else
@@ -933,7 +976,7 @@ void TimeTask_NTPSync(void *pvParameters)
   char logMsg[LOG_MSG_SIZE];
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = 3600 * 24 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 Day
+  const TickType_t xWakePeriod = 3600 * 24 * 7 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 7 Day
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
@@ -990,7 +1033,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();                           // 현재 Tick 시간
   const TickType_t xWakePeriod = 10 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 sec
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   while (true)
   {
@@ -999,9 +1042,9 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
     time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
 
     // 현재 시간 정보 로깅
-    struct tm timeinfo;
-    localtime_r(&updated_time, &timeinfo);
-    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeinfo));
+    struct tm timeInfo;
+    localtime_r(&updated_time, &timeInfo);
+    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
     enqueue_log(logMsg);
 
     // 10초마다 정확하게 대기
@@ -1013,7 +1056,6 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
 void log_print_task(void *pvParameters)
 {
   char logMsg[LOG_MSG_SIZE];
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (true)
   {
@@ -1092,7 +1134,6 @@ void callback(char *topic, byte *payload, unsigned int length)
   {
     payloadBuffer += (char)p[i]; // payload 버퍼 - Split 파싱에 사용
   }
-
   // DebugSerial.println(payloadBuffer);
 
   int cnt = 0;
