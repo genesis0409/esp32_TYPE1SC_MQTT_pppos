@@ -21,6 +21,7 @@
 #include "freertos/queue.h" // 로깅 시스템을 별도로 분리하기 위한 freertos 큐
 #include "apps/sntp/sntp.h" //Simplified Network Time Protocol 관련 함수를 사용
 
+#include "ScheduleDB.h"
 #include "config.h"
 
 #define DebugSerial Serial
@@ -95,14 +96,17 @@ char IPAddr[32];
 char sckInfo[128];
 char recvBuffer[700];
 int recvSize;
-bool httpRecvOK = false;           // http 메시지 수신 여부
-uint8_t httpTryCount = 0;          // http 통신 시도 횟수
-const uint8_t httpTryLimit = 3;    // http 통신 시도 한계 횟수
-bool farmtalkServerResult = false; // 서버 발 사용자 등록 결과
+bool httpRecvOK = false;               // http 메시지 수신 여부
+uint8_t httpTryCount = 0;              // http 통신 시도 횟수
+const uint8_t httpTryLimit = 3;        // http 통신 시도 한계 횟수
+bool farmtalkServerResult = false;     // 서버 발 사용자 등록 결과
+int farmtalkServerLoginResult = -1;    // 서버 발 사용자 로그인 결과
+int farmtalkServerScheduleResult = -1; // 서버 발 스케줄 정보 수신 결과
 
 void getTime(); // 시간 정보 업데이트 함수
 
 // NTP 시간 관련 변수
+#define FORMAT_TIME "%Y-%m-%d %H:%M:%S" // 1995-04-09 20:01:01
 static const char *TIME_TAG = "[SNTP]";
 static const char *TIME_TAG_ESP = "[ESP]";
 
@@ -223,7 +227,7 @@ const char *getStatus(int value);                        // bit를 topic으로 �
 /* EXT_ANT_ON 0 : Use an internal antenna.
  * EXT_ANT_ON 1 : Use an external antenna.
  */
-#define EXT_ANT_ON 0
+#define EXT_ANT_ON 1
 
 void extAntenna()
 {
@@ -234,6 +238,14 @@ void extAntenna()
     delay(100);
   }
 }
+
+// Schedule setting *******************************************************************************
+
+ScheduleDBManager manager; // ScheduleDBManager 객체 생성
+
+void parseAndAddSchedule(const char *jsonPart);    // JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseAndUpdateSchedule(const char *jsonPart); // JSON 파싱 및 ScheduleDB [수정(교체)] 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 교체
+void parseAndDeleteSchedule(const char *jsonPart); // JSON 파싱 및 ScheduleDB 삭제 함수
 
 // RS485 setting **********************************************************************************
 // #define SLAVE_ID 1
@@ -1008,7 +1020,9 @@ void TimeTask_NTPSync(void *pvParameters)
     if (retry < retry_count)
     {
       // asctime(&timeInfo): 구조체 내부 시간정보를 읽기 쉽게 문자열 형태로 변환 "%a %b %d %H:%M:%S %Y\n"
-      snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, asctime(&timeInfo));
+      // snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, asctime(&timeInfo));
+      strftime(logMsg, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
+      snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, logMsg);
       enqueue_log(logMsg);
 
       // 동기화된 시간 저장
@@ -1044,7 +1058,10 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
     // 현재 시간 정보 로깅
     struct tm timeInfo;
     localtime_r(&updated_time, &timeInfo);
-    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
+
+    // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
+    strftime(logMsg, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
+    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, logMsg);
     enqueue_log(logMsg);
 
     // 10초마다 정확하게 대기
@@ -1520,7 +1537,7 @@ void reconnect()
     // if (client.connect(mqttUsername.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
     if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + " " + WILL_MESSAGE).c_str()))
     {
-      DebugSerial.println("connected");
+      DebugSerial.println("MQTT connected");
 
       client.subscribe((SUB_TOPIC + DEVICE_TOPIC + CONTROL_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
 
@@ -1934,6 +1951,101 @@ void enqueue_log(const char *message)
   }
 }
 
+// JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseAndAddSchedule(const char *jsonPart)
+{
+  // JSON 파싱을 위한 JsonDocument 생성
+  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  DeserializationError error = deserializeJson(doc, jsonPart);
+
+  // 파싱 오류 확인
+  if (error)
+  {
+    Serial.print(F("deserializeJson() Failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  // JSON 배열 반복하여 ScheduleDB 객체 생성 후 추가
+  for (JsonObject obj : doc.as<JsonArray>())
+  {
+    long idx = obj["Idx"];
+    String id = obj["Id"].as<String>();
+    int num = obj["Num"];
+    String name = obj["Name"].as<String>();
+    String time = obj["Time"].as<String>();
+    int wmode = obj["WMode"];
+    int delay = obj["Delay"];
+    bool value = obj["Value"];
+    String bweeks = obj["BWeeks"].as<String>();
+    bool enable = obj["Enable"];
+
+    // ScheduleDB 객체 생성 및 추가
+    ScheduleDB schedule(idx, id, num, name, time, wmode, delay, value, bweeks, enable);
+    manager.addSchedule(schedule);
+  }
+}
+
+// JSON 파싱 및 ScheduleDB [수정(교체)] 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 교체
+void parseAndUpdateSchedule(const char *jsonPart)
+{
+  // JSON 파싱을 위한 JsonDocument 생성
+  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  DeserializationError error = deserializeJson(doc, jsonPart);
+
+  // 파싱 오류 확인
+  if (error)
+  {
+    Serial.print(F("deserializeJson() Failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  // JSON 배열 반복하여 ScheduleDB 객체 생성 후 업데이트(교체)
+  for (JsonObject obj : doc.as<JsonArray>())
+  {
+    long idx = obj["Idx"];
+    String id = obj["Id"].as<String>();
+    int num = obj["Num"];
+    String name = obj["Name"].as<String>();
+    String time = obj["Time"].as<String>();
+    int wmode = obj["WMode"];
+    int delay = obj["Delay"];
+    bool value = obj["Value"];
+    String bweeks = obj["BWeeks"].as<String>();
+    bool enable = obj["Enable"];
+
+    // ScheduleDB 객체 생성 및 업데이트(교체)
+    ScheduleDB schedule(idx, id, num, name, time, wmode, delay, value, bweeks, enable);
+    manager.updateSchedule(idx, schedule);
+  }
+}
+
+// JSON 파싱 및 ScheduleDB 삭제 함수
+void parseAndDeleteSchedule(const char *jsonPart)
+{
+  // JSON 파싱을 위한 JsonDocument 생성
+  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  DeserializationError error = deserializeJson(doc, jsonPart);
+
+  // 파싱 오류 확인
+  if (error)
+  {
+    Serial.print(F("deserializeJson() Failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  // JSON 배열 반복하여 ScheduleDB 객체 삭제
+  for (JsonObject obj : doc.as<JsonArray>())
+  {
+    long idx = obj["Idx"];
+
+    // ScheduleDB 객체 삭제
+    manager.deleteSchedule(idx);
+  }
+}
+
 void setup()
 {
   // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -2233,19 +2345,22 @@ void setup()
     {
       code_sen2 = "5";
     }
-    sensorId_01 = readFile(SPIFFS, sensorId_01Path);
+
     // http 연결 정보 사전 구성
     BROKER_ID = readFile(SPIFFS, BROKER_IDPath);
     BROKER_PORT = readFile(SPIFFS, BROKER_PORTPath);
 
+    // http 연결 정보 사전 구성
     DebugSerial.print("BROKER_ID: ");
     DebugSerial.println(BROKER_ID);
     DebugSerial.print("BROKER_PORT: ");
     DebugSerial.println(BROKER_PORT);
 
-    //_HOST_ID 와 _PORT 둘중 하나라도 비어있을 때 http 메시지 송신
+    //_HOST_ID 와 _PORT 둘중 하나라도 비어있을 때(== 초기 생성 로직) http 메시지 송신
     if (BROKER_ID == "" || BROKER_PORT == "")
     {
+      DebugSerial.print("[ALERT] Create DB Process...");
+
       int ipErrCount = 0;
       /* Enter a DNS address to get an IP address */
       while (1)
@@ -2282,7 +2397,7 @@ void setup()
         DebugSerial.println("TCP Socket Create!!!");
       }
 
-    INFO:
+    INFO_CREATE:
 
       /* 2 :TCP Socket Activation */
       if (TYPE1SC.socketActivate() == 0)
@@ -2306,7 +2421,7 @@ void setup()
         if (strcmp(sckInfo, "ACTIVATED"))
         {
           delay(3000);
-          goto INFO;
+          goto INFO_CREATE;
         }
       }
 
@@ -2321,7 +2436,7 @@ void setup()
       data += "Host: " + String(IPAddr) + "\r\n";
       data += "Connection: keep-alive\r\n\r\n";
 
-      // String data = "https://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0;
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
 
       // http 수신 성공적이면 타지 않음; 3회 시도 후 실패 시 공장초기화
       while (!httpRecvOK && httpTryCount++ < httpTryLimit)
@@ -2405,10 +2520,10 @@ void setup()
               DebugSerial.print("port: ");
               DebugSerial.println(port);
 
-              // result가 false 이면 사용자 등록이 실패한 것
+              // result가 false 이면 이미 존재하는 사용자, 아마 안탈것같은데 여기
               if (farmtalkServerResult == false)
               {
-                continue;
+                httpRecvOK = true;
               }
               else // 사용자 등록 성공
               {
@@ -2442,6 +2557,305 @@ void setup()
         delay(2000); // 2초 후 재시도
       } // while (최대 3회)
 
+      // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+      // 일단 미구현; 성공한다고 가정
+      if (httpRecvOK == false)
+      {
+        // DebugSerial.println("[ALERT] Server Returns result: false...");
+        // DebugSerial.println("Running Factory Reset...");
+
+        // SPIFFS.remove(mqttUsernamePath);
+        // SPIFFS.remove(mqttPwPath);
+        // SPIFFS.remove(sensorId_01Path);
+        // SPIFFS.remove(sensorId_02Path);
+        // SPIFFS.remove(relayIdPath);
+        // SPIFFS.remove(BROKER_IDPath);
+        // SPIFFS.remove(BROKER_PORTPath);
+
+        // DebugSerial.println("Factory Reset Complete.");
+
+        // DebugSerial.println("ESP will restart.");
+        // delay(1000);
+        // ESP.restart();
+      }
+
+      httpTryCount = 0; // http 통신 시도 횟수 초기화
+    } // if (BROKER_ID == "" || BROKER_PORT == "")
+
+    httpRecvOK = false; // http 메시지 수신 여부 초기화
+
+    if (BROKER_ID != "" && BROKER_PORT != "") // BROKER_ID와 BROKER_PORT가 존재하면 (==생성로직을 한번 탔으면)
+    {
+      // 로그인 http 로직 수행
+      DebugSerial.print("[ALERT] Log In Process...");
+
+      if (IPAddr[0] == '\0') // 생성단계를 거치지 않고 로그인 로직으로 들어왔을 때 ip가 없는상태
+      {
+        int ipErrCount = 0;
+        /* Enter a DNS address to get an IP address */
+        while (1)
+        {
+          if (TYPE1SC.getIPAddr(_HOST_DOMAIN, IPAddr, sizeof(IPAddr)) == 0)
+          {
+            DebugSerial.print("Host IP Address : ");
+            DebugSerial.println(IPAddr);
+
+            /* 1 :TCP Socket Create ( 0:UDP, 1:TCP ) */
+            if (TYPE1SC.socketCreate(1, IPAddr, _HOST_PORT) == 0)
+            {
+              DebugSerial.println("TCP Socket Create!!!");
+            }
+
+            break;
+          }
+          else
+          {
+            if (ipErrCount++ > 60)
+            {
+              DebugSerial.print("Cannot Connect to ");
+              DebugSerial.print(_HOST_DOMAIN);
+              DebugSerial.println("... ESP Restart.");
+              ESP.restart();
+            }
+            DebugSerial.print("IP Address Error!!!");
+            DebugSerial.print("; count: ");
+            DebugSerial.println(ipErrCount);
+          }
+          delay(2000);
+        }
+      }
+
+      // Use TCP Socket
+      /********************************/
+      String data = "GET /api/Auth/Login?";
+      data += "id=" + mqttUsername + "&";
+      data += "pass=" + mqttPw;
+
+      data += " HTTP/1.1\r\n";
+      data += "Host: " + String(IPAddr) + "\r\n";
+      data += "Connection: keep-alive\r\n\r\n";
+
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
+
+      // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
+      while (!httpRecvOK && httpTryCount++ < httpTryLimit)
+      {
+        /* 3-1 :TCP Socket Send Data */
+        if (TYPE1SC.socketSend(data.c_str()) == 0)
+        {
+          DebugSerial.print("[HTTP Send] >> ");
+          DebugSerial.println(data);
+#if defined(USE_LCD)
+          u8x8log.print("[HTTP Send] >> ");
+          u8x8log.print(data);
+          u8x8log.print("\n");
+#endif
+        }
+        else
+        {
+          DebugSerial.println("Send Fail!!!");
+#if defined(USE_LCD)
+          u8x8log.print("Send Fail!!!\n");
+#endif
+        }
+
+        /* 4-1 :TCP Socket Recv Data */
+        if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+        {
+          DebugSerial.print("[RecvSize] >> ");
+          DebugSerial.println(recvSize);
+          DebugSerial.print("[Recv] >> ");
+          DebugSerial.println(recvBuffer);
+#if defined(USE_LCD)
+          u8x8log.print("[RecvSize] >> ");
+          u8x8log.print(recvSize);
+          u8x8log.print("\n");
+          u8x8log.print("[Recv] >> ");
+          u8x8log.print(recvBuffer);
+          u8x8log.print("\n");
+#endif
+
+          // http 메시지 처리
+          // 1. 헤더와 바디 분리
+          const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+          if (jsonStart == NULL)
+          {
+            DebugSerial.println("Cannot find Http Header...");
+            httpRecvOK = false;
+          }
+          else // JSON 구분 성공 시 파싱
+          {
+            // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+            jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+
+            // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+            const char *jsonPart = strchr(jsonStart, '{'); // JSON 시작 위치 찾기
+
+            // JSON 파싱을 위한 JsonDocument 생성
+            JsonDocument doc; // Deprecated 경고 없이 최신 방식으로 사용
+
+            // JSON 데이터 파싱
+            DeserializationError error = deserializeJson(doc, jsonPart);
+
+            // 파싱 오류 확인; 여기서 아마 HTTP OK 2XX 아닌 메시지는 걸러질듯
+            if (error)
+            {
+              DebugSerial.print(F("deserializeJson() Failed: "));
+              DebugSerial.println(error.f_str());
+              httpRecvOK = false;
+            }
+            else
+            {
+              // "result" 값 추출
+              farmtalkServerLoginResult = doc["result"];
+
+              // 결과 출력
+              DebugSerial.print("Login result: ");
+              DebugSerial.println(farmtalkServerLoginResult);
+
+              // result가 0이 아니면 로그인 실패
+              if (farmtalkServerLoginResult != 0)
+              {
+                httpRecvOK = true;
+              }
+              else // result==0 이면 사용자 로그인 성공
+              {
+                httpRecvOK = true;
+              }
+            } // if json error
+          } // if jsonStart null
+        } // if TYPE1SC.socketRecv()
+        else
+        {
+          httpRecvOK = false;
+          DebugSerial.println("Recv Fail!!!");
+#if defined(USE_LCD)
+          u8x8log.print("Recv Fail!!!\n");
+#endif
+        }
+        delay(2000); // 2초 후 재시도
+      } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
+
+      // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+      // 일단 미구현; 성공한다고 가정
+      if (httpRecvOK == false)
+      {
+        // DebugSerial.println("[ALERT] Server Returns result: false...");
+        // DebugSerial.println("Running Factory Reset...");
+
+        // SPIFFS.remove(mqttUsernamePath);
+        // SPIFFS.remove(mqttPwPath);
+        // SPIFFS.remove(sensorId_01Path);
+        // SPIFFS.remove(sensorId_02Path);
+        // SPIFFS.remove(relayIdPath);
+        // SPIFFS.remove(BROKER_IDPath);
+        // SPIFFS.remove(BROKER_PORTPath);
+
+        // DebugSerial.println("Factory Reset Complete.");
+
+        // DebugSerial.println("ESP will restart.");
+        // delay(1000);
+        // ESP.restart();
+      }
+
+      httpTryCount = 0; // http 통신 시도 횟수 초기화
+    }
+
+    httpRecvOK = false; // http 메시지 수신 여부 초기화
+
+    if (farmtalkServerLoginResult == 0) // 로그인 성공 시 스케줄 정보 수신 및 저장
+    {
+      DebugSerial.print("[ALERT] Download Schedule Info Process...");
+
+      // Use TCP Socket
+      /********************************/
+      String data = "GET /api/Auth/GetSchedule?";
+      data += "id=" + mqttUsername;
+
+      data += " HTTP/1.1\r\n";
+      data += "Host: " + String(IPAddr) + "\r\n";
+      data += "Connection: keep-alive\r\n\r\n";
+
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
+      // String data = "http://gh.farmtalk.kr:5038/api/Auth/GetSchedule?id=daon";
+
+      // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
+      while (!httpRecvOK && httpTryCount++ < httpTryLimit)
+      {
+        /* 3-1 :TCP Socket Send Data */
+        if (TYPE1SC.socketSend(data.c_str()) == 0)
+        {
+          DebugSerial.print("[HTTP Send] >> ");
+          DebugSerial.println(data);
+#if defined(USE_LCD)
+          u8x8log.print("[HTTP Send] >> ");
+          u8x8log.print(data);
+          u8x8log.print("\n");
+#endif
+        }
+        else
+        {
+          DebugSerial.println("Send Fail!!!");
+#if defined(USE_LCD)
+          u8x8log.print("Send Fail!!!\n");
+#endif
+        }
+
+        /* 4-1 :TCP Socket Recv Data */
+        if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+        {
+          DebugSerial.print("[RecvSize] >> ");
+          DebugSerial.println(recvSize);
+          DebugSerial.print("[Recv] >> ");
+          DebugSerial.println(recvBuffer);
+#if defined(USE_LCD)
+          u8x8log.print("[RecvSize] >> ");
+          u8x8log.print(recvSize);
+          u8x8log.print("\n");
+          u8x8log.print("[Recv] >> ");
+          u8x8log.print(recvBuffer);
+          u8x8log.print("\n");
+#endif
+
+          // http 메시지 처리
+          // 1. 헤더와 바디 분리
+          const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+          if (jsonStart == NULL)
+          {
+            DebugSerial.println("Cannot find Http Header...");
+            httpRecvOK = false;
+          }
+          else // JSON 구분 성공 시 파싱
+          {
+            // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+            jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+
+            // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+            const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
+
+            // http메시지 저장 로직 넣기
+            parseAndAddSchedule(jsonPart);
+
+            httpRecvOK = true;
+
+            // 디버그 모든 스케줄 출력
+            manager.printAllSchedules();
+
+          } // if jsonStart null
+        } // if TYPE1SC.socketRecv()
+        else
+        {
+          httpRecvOK = false;
+          DebugSerial.println("Recv Fail!!!");
+#if defined(USE_LCD)
+          u8x8log.print("Recv Fail!!!\n");
+#endif
+        }
+        delay(2000); // 2초 후 재시도
+      } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
+
       /* 5 :TCP Socket DeActivation */
       if (TYPE1SC.socketDeActivate() == 0)
       {
@@ -2462,46 +2876,48 @@ void setup()
 #endif
       }
 
-      /* 6 :TCP Socket DeActivation */
-      if (TYPE1SC.socketClose() == 0)
+      // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+      // 일단 미구현; 성공한다고 가정
+      if (httpRecvOK == false)
       {
-        DebugSerial.println("TCP Socket Close!!!");
+        // DebugSerial.println("[ALERT] Server Returns result: false...");
+        // DebugSerial.println("Running Factory Reset...");
+
+        // SPIFFS.remove(mqttUsernamePath);
+        // SPIFFS.remove(mqttPwPath);
+        // SPIFFS.remove(sensorId_01Path);
+        // SPIFFS.remove(sensorId_02Path);
+        // SPIFFS.remove(relayIdPath);
+        // SPIFFS.remove(BROKER_IDPath);
+        // SPIFFS.remove(BROKER_PORTPath);
+
+        // DebugSerial.println("Factory Reset Complete.");
+
+        // DebugSerial.println("ESP will restart.");
+        // delay(1000);
+        // ESP.restart();
+      }
+
+      httpTryCount = 0; // http 통신 시도 횟수 초기화
+    }
+
+    /* 6 :TCP Socket DeActivation */
+    if (TYPE1SC.socketClose() == 0)
+    {
+      DebugSerial.println("TCP Socket Close!!!");
 #if defined(USE_LCD)
-        u8x8log.print("TCP Socket Close!!!\n");
+      u8x8log.print("TCP Socket Close!!!\n");
 #endif
-      }
+    }
 
-      /* 7 :Detach Network */
-      if (TYPE1SC.setCFUN(0) == 0)
-      {
-        DebugSerial.println("detach Network!!!");
+    /* 7 :Detach Network */
+    if (TYPE1SC.setCFUN(0) == 0)
+    {
+      DebugSerial.println("detach Network!!!");
 #if defined(USE_LCD)
-        u8x8log.print("detach Network!!!\n");
+      u8x8log.print("detach Network!!!\n");
 #endif
-      }
-
-      // http 메시지 수신에 문제가 있거나
-      //  result가 false면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
-      if (httpRecvOK == false || farmtalkServerResult == false)
-      {
-        DebugSerial.println("[ALERT] Server Returns result: false...");
-        DebugSerial.println("Running Factory Reset...");
-
-        SPIFFS.remove(mqttUsernamePath);
-        SPIFFS.remove(mqttPwPath);
-        SPIFFS.remove(sensorId_01Path);
-        SPIFFS.remove(sensorId_02Path);
-        SPIFFS.remove(relayIdPath);
-        SPIFFS.remove(BROKER_IDPath);
-        SPIFFS.remove(BROKER_PORTPath);
-
-        DebugSerial.println("Factory Reset Complete.");
-
-        DebugSerial.println("ESP will restart.");
-        delay(1000);
-        ESP.restart();
-      }
-    } // if (BROKER_ID == "" || BROKER_PORT == "")
+    }
 
     int rssi, rsrp, rsrq, sinr;
     // AT커맨드로 네트워크 정보 획득 (3회)
