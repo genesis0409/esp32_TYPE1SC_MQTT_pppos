@@ -1,0 +1,84 @@
+#include "TYPE1SC.h"
+#include <Arduino.h>
+
+#define DebugSerial Serial
+HardwareSerial M1Serial(2); // use ESP32 UART2, Arduino ESP32 v3
+// #define M1Serial Serial2      // ESP32, Arduino ESP32 v3 업데이트로 미사용
+
+#define PWR_PIN 5
+#define RST_PIN 18
+#define WAKEUP_PIN 19
+#define EXT_ANT 4
+
+TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
+
+/* EXT_ANT_ON 0 : Use an internal antenna.
+ * EXT_ANT_ON 1 : Use an external antenna.
+ */
+#define EXT_ANT_ON 1
+
+void extAntenna()
+{
+  if (EXT_ANT_ON)
+  {
+    pinMode(EXT_ANT, OUTPUT);
+    digitalWrite(EXT_ANT, HIGH);
+    delay(100);
+  }
+}
+
+void setup()
+{
+
+  // M1Serial.begin(115200);  // ESP32, Arduino ESP32 v3 업데이트로 미사용
+  M1Serial.begin(115200, SERIAL_8N1, 16, 17); // Arduino ESP32 v3
+  DebugSerial.begin(115200);
+
+  DebugSerial.println("TYPE1SC Module Start!!!");
+
+  extAntenna();
+
+  /* TYPE1SC Module Initialization */
+  if (TYPE1SC.init())
+  {
+    DebugSerial.println("TYPE1SC Module Error!!!");
+  }
+
+  /* Network Disable */
+  if (TYPE1SC.setCFUN(0) == 0)
+  {
+    DebugSerial.println("TYPE1SC Network Disable!!!");
+  }
+
+  delay(1000);
+
+  char *apnAddr = "simplio.apn"; /* Vodafone Global IoT SIM APN */
+
+  if (TYPE1SC.setAPN(apnAddr) == 0)
+  {
+    DebugSerial.println("TYPE1SC Set APN Address!!!");
+  }
+
+  /* Board Reset */
+  TYPE1SC.reset();
+  delay(2000);
+
+  /* TYPE1SC Module Initialization */
+  if (TYPE1SC.init())
+  {
+    DebugSerial.println("TYPE1SC Module Error!!!");
+  }
+
+  DebugSerial.println("TYPE1SC Module Ready!!!");
+
+  char apn[128];
+  if (TYPE1SC.getAPN(apn, sizeof(apn)) == 0)
+  {
+    DebugSerial.print("GET APN Address: ");
+    DebugSerial.println(apn);
+  }
+
+  DebugSerial.println("TYPE1SC APN Setup Complete!!!");
+}
+
+void loop() { delay(1000); }
