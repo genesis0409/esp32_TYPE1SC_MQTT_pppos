@@ -87,6 +87,14 @@ public:
         return false;
     }
 
+    // scheduleList 맵을 const 참조로 반환하여, 외부에서 ScheduleDB 객체들을 읽기 전용으로 접근할 수 있게 함.
+    // const std::map<long, ScheduleDB>& 형식으로 반환하여, 이 메서드를 호출하는 쪽에서 scheduleList를 수정할 수 없도록 함.
+    // 모든 ScheduleDB 객체 반환 (모든 스케줄을 가져오기 위한 메서드)
+    const std::map<long, ScheduleDB> &getAllSchedules() const
+    {
+        return scheduleList;
+    }
+
     // 모든 ScheduleDB 출력 (테스트용)
     void printAllSchedules()
     {
