@@ -1990,7 +1990,7 @@ void parseAndAddSchedule(const char *jsonPart)
 void parseAndUpdateSchedule(const char *jsonPart)
 {
   // JSON 파싱을 위한 JsonDocument 생성
-  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  StaticJsonDocument<256> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
   DeserializationError error = deserializeJson(doc, jsonPart);
 
   // 파싱 오류 확인
@@ -2001,19 +2001,31 @@ void parseAndUpdateSchedule(const char *jsonPart)
     return;
   }
 
-  // JSON 배열 반복하여 ScheduleDB 객체 생성 후 업데이트(교체)
-  for (JsonObject obj : doc.as<JsonArray>())
+  // // JSON 배열 반복하여 ScheduleDB 객체 생성 후 업데이트(교체)
+  // for (JsonObject obj : doc.as<JsonArray>())
+  // {
+  //   int idx = obj["Idx"];
+  //   String id = obj["Id"].as<String>();
+  //   int num = obj["Num"];
+  //   String name = obj["Name"].as<String>();
+  //   String time = obj["Time"].as<String>();
+  //   int wmode = obj["WMode"];
+  //   int delay = obj["Delay"];
+  //   bool value = obj["Value"];
+  //   String bweeks = obj["BWeeks"].as<String>();
+  //   bool enable = obj["Enable"];
+  else
   {
-    long idx = obj["Idx"];
-    String id = obj["Id"].as<String>();
-    int num = obj["Num"];
-    String name = obj["Name"].as<String>();
-    String time = obj["Time"].as<String>();
-    int wmode = obj["WMode"];
-    int delay = obj["Delay"];
-    bool value = obj["Value"];
-    String bweeks = obj["BWeeks"].as<String>();
-    bool enable = obj["Enable"];
+    int idx = doc["Idx"];
+    String id = doc["Id"];
+    int num = doc["Num"];
+    String name = doc["Name"];
+    String time = doc["Time"];
+    int wmode = doc["WMode"];
+    int delay = doc["Delay"];
+    bool value = doc["Value"];
+    String bweeks = doc["BWeeks"];
+    bool enable = doc["Enable"];
 
     // ScheduleDB 객체 생성 및 업데이트(교체)
     ScheduleDB schedule(idx, id, num, name, time, wmode, delay, value, bweeks, enable);
@@ -2025,7 +2037,7 @@ void parseAndUpdateSchedule(const char *jsonPart)
 void parseAndDeleteSchedule(const char *jsonPart)
 {
   // JSON 파싱을 위한 JsonDocument 생성
-  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  StaticJsonDocument<256> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
   DeserializationError error = deserializeJson(doc, jsonPart);
 
   // 파싱 오류 확인
@@ -2036,10 +2048,13 @@ void parseAndDeleteSchedule(const char *jsonPart)
     return;
   }
 
-  // JSON 배열 반복하여 ScheduleDB 객체 삭제
-  for (JsonObject obj : doc.as<JsonArray>())
+  // // JSON 배열 반복하여 ScheduleDB 객체 삭제
+  // for (JsonObject obj : doc.as<JsonArray>())
+  // {
+  //   int idx = obj["Idx"];
+  else
   {
-    long idx = obj["Idx"];
+    int idx = doc["Idx"];
 
     // ScheduleDB 객체 삭제
     manager.deleteSchedule(idx);
