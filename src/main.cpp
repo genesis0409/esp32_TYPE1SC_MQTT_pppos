@@ -107,17 +107,28 @@ void getTime(); // 시간 정보 업데이트 함수
 
 // NTP 시간 관련 변수
 #define FORMAT_TIME "%Y-%m-%d %H:%M:%S" // 1995-04-09 20:01:01
+#define FORMAT_TIME_LEN 19              // 1995-04-09 20:01:01 문자열의 길이
 static const char *TIME_TAG = "[SNTP]";
 static const char *TIME_TAG_ESP = "[ESP]";
 
 time_t current_time;          // NTP 동기화 후 저장되는 기준 시간
 TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
+bool isNTPtimeUpdated = false;
 
 static QueueHandle_t logQueue; // 로그 메시지를 저장할 큐
 #define LOG_QUEUE_SIZE 10      // 큐 크기 설정
 #define LOG_MSG_SIZE 128       // 로그 메시지 크기 설정
 
 void enqueue_log(const char *message); // 로그 메시지를 큐에 추가하는 함수
+
+struct ScheduleData // ScheduleDB 멤버변수 중 릴레이 제어에 쓰일 변수
+{
+  int num;
+  bool value;
+  int delay;
+};
+void Input_writingRegisters_Schedule(const ScheduleData &data); // Delay 값으로 레지스터 사전입력
+QueueHandle_t scheduleQueue;                                    // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -243,9 +254,14 @@ void extAntenna()
 
 ScheduleDBManager manager; // ScheduleDBManager 객체 생성
 
-void parseAndAddSchedule(const char *jsonPart);    // JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
-void parseAndUpdateSchedule(const char *jsonPart); // JSON 파싱 및 ScheduleDB [수정(교체)] 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 교체
-void parseAndDeleteSchedule(const char *jsonPart); // JSON 파싱 및 ScheduleDB 삭제 함수
+void parseHttpAndAddSchedule(const char *jsonPart); // [HTTP] JSON 배열 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseMqttAndAddSchedule(const char *jsonPart); // [MQTT] JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseAndUpdateSchedule(const char *jsonPart);  // JSON 파싱 및 ScheduleDB [수정(교체)] 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 교체
+void parseAndDeleteSchedule(const char *jsonPart);  // JSON 파싱 및 ScheduleDB 삭제 함수
+
+bool stringToStructTm(const String &timeStr, struct tm &timeStruct);
+bool compareDate(const struct tm &currentTime, const String &scheduleTimeStr);
+bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr);
 
 // RS485 setting **********************************************************************************
 // #define SLAVE_ID 1
@@ -981,10 +997,10 @@ void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
 // NTP 서버와 시간을 동기화하는 태스크
 void TimeTask_NTPSync(void *pvParameters)
 {
-  time_t now = 0;             // 현재 시간 저장
-  struct tm timeInfo = {0};   // 시간 형식 구조체: 연, 월, 일, 시, 분, 초 등
-  int retry = 0;              // NTP 서버와의 동기화 시도 횟수 카운트
-  const int retry_count = 10; // 최대 재시도 횟수
+  struct tm timeInfo = {0};      // 시간 형식 구조체: 연, 월, 일, 시, 분, 초 등
+  int retry = 0;                 // NTP 서버와의 동기화 시도 횟수 카운트
+  const int retry_count = 10;    // 최대 재시도 횟수
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
   char logMsg[LOG_MSG_SIZE];
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -1002,9 +1018,10 @@ void TimeTask_NTPSync(void *pvParameters)
     configTime(9 * 3600, 0, "pool.ntp.org"); // GMT+09:00
 
     // 시간 동기화 대기
-    time_t now = 0;
+    time_t now = 0;               // 현재 시간 저장
     time(&now);                   // 현재 시간을 now 변수에 저장
     localtime_r(&now, &timeInfo); // 이를 localtime_r() 함수로 timeInfo 구조체로 변환
+
     retry = 0;
     while ((timeInfo.tm_year < (2016 - 1900)) && (++retry < retry_count)) // 시스템 시간이 2016년 이전일 경우(즉, 시간이 아직 설정되지 않았을 때) 최대 retry_count만큼 재시도
     {
@@ -1021,13 +1038,21 @@ void TimeTask_NTPSync(void *pvParameters)
     {
       // asctime(&timeInfo): 구조체 내부 시간정보를 읽기 쉽게 문자열 형태로 변환 "%a %b %d %H:%M:%S %Y\n"
       // snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, asctime(&timeInfo));
-      strftime(logMsg, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
-      snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, logMsg);
+      // enqueue_log(logMsg);
+
+      // 시간 형식 문자열을 timeBuffer에 저장
+      strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
+      snprintf(logMsg, LOG_MSG_SIZE, "%s TIME SET TO %s", TIME_TAG, timeBuffer);
       enqueue_log(logMsg);
 
       // 동기화된 시간 저장
       current_time = now;
       lastSyncTickCount = xTaskGetTickCount(); // Tick 기반 시간 저장
+
+      if (!isNTPtimeUpdated)
+      {
+        isNTPtimeUpdated = true;
+      }
     }
     else
     {
@@ -1035,7 +1060,7 @@ void TimeTask_NTPSync(void *pvParameters)
       enqueue_log(logMsg);
     }
 
-    // 주기적으로 1시간마다 다시 동기화
+    // 주기적으로 동기화
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
@@ -1043,28 +1068,109 @@ void TimeTask_NTPSync(void *pvParameters)
 // ESP32 내부 타이머로 시간 업데이트하는 태스크
 void TimeTask_ESP_Update_Time(void *pvParameters)
 {
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
   char logMsg[LOG_MSG_SIZE];
-  TickType_t xLastWakeTime = xTaskGetTickCount();                           // 현재 Tick 시간
-  const TickType_t xWakePeriod = 10 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 sec
+  TickType_t xLastWakeTime = xTaskGetTickCount();                          // 현재 Tick 시간
+  const TickType_t xWakePeriod = 1 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 sec
 
-  vTaskDelay(10000 / portTICK_PERIOD_MS);
+  vTaskDelay(7000 / portTICK_PERIOD_MS);
 
   while (true)
   {
-    // 경과한 Tick을 기준으로 시간 업데이트
-    TickType_t ticksElapsed = xTaskGetTickCount() - lastSyncTickCount;               // 동기화 이후 경과한 Tick 계산
-    time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
+    if (isNTPtimeUpdated)
+    {
+      // 경과한 Tick을 기준으로 시간 업데이트
+      TickType_t ticksElapsed = xTaskGetTickCount() - lastSyncTickCount;               // 동기화 이후 경과한 Tick 계산
+      time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
 
-    // 현재 시간 정보 로깅
-    struct tm timeInfo;
-    localtime_r(&updated_time, &timeInfo);
+      // 현재 시간 정보 로깅
+      struct tm timeInfo;
+      localtime_r(&updated_time, &timeInfo);
+      int updated_Day = timeInfo.tm_yday;
+      int updated_Weekday = timeInfo.tm_wday; // 0=일요일, 6=토요일
 
-    // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
-    strftime(logMsg, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
-    snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, logMsg);
-    enqueue_log(logMsg);
+      ScheduleData data;
 
-    // 10초마다 정확하게 대기
+      for (auto &item : manager.getAllSchedules())
+      {
+        ScheduleDB &schedule = item.second;
+
+        // 하루가 바뀌면 실행 플래그 초기화
+        schedule.resetExecutedToday(updated_Day);
+
+        if (schedule.getEnable()) // 활성화된 스케줄인가?
+        {
+          switch (schedule.getWMode()) // 스케줄 별 릴레이 동작 수행
+          {
+          case 0: // 일회성 모드
+            if (compareDate(timeInfo, schedule.getTime()) && !schedule.hasExecutedToday())
+            {
+              // 스케줄데이터 구조체에 할당
+              data.num = schedule.getNum();
+              data.value = schedule.getValue();
+              data.delay = schedule.getDelay();
+
+              // 큐에 데이터 전송
+              if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
+              {
+                Serial.println("Failed to send [One-Day] Schedule Data to Queue");
+              }
+
+              schedule.setExecutedToday(true);
+            }
+            break;
+
+          case 1: // 매일 모드
+            if (compareTime(timeInfo, schedule.getTime()) && !schedule.hasExecutedToday())
+            {
+              // 스케줄데이터 구조체에 할당
+              data.num = schedule.getNum();
+              data.value = schedule.getValue();
+              data.delay = schedule.getDelay();
+
+              // 큐에 데이터 전송
+              if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
+              {
+                Serial.println("Failed to send [Daily] Schedule Data to Queue");
+              }
+
+              schedule.setExecutedToday(true);
+            }
+            break;
+
+          case 2: // 요일별 모드
+            // 요일에 맞는지 확인 후 동작 수행
+            if (compareTime(timeInfo, schedule.getTime()) && schedule.getWeekDay(updated_Weekday) && !schedule.hasExecutedToday()) // 요일 비교
+            {
+              // 스케줄데이터 구조체에 할당
+              data.num = schedule.getNum();
+              data.value = schedule.getValue();
+              data.delay = schedule.getDelay();
+
+              // 큐에 데이터 전송
+              if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
+              {
+                Serial.println("Failed to send [Weekly] Schedule Data to Queue");
+              }
+
+              schedule.setExecutedToday(true);
+            }
+            break;
+          } // switch (schedule.getWMode())
+
+        } // if (schedule.getEnable())
+      }
+
+      // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
+
+      // 시간 형식 문자열을 timeBuffer에 저장
+      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
+      // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, timeBuffer);
+      // enqueue_log(logMsg);
+
+    } // if (isNTPtimeUpdated)
+
+    // 주기마다 정확하게 대기
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
 }
@@ -1951,8 +2057,8 @@ void enqueue_log(const char *message)
   }
 }
 
-// JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
-void parseAndAddSchedule(const char *jsonPart)
+// [HTTP] JSON 배열 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseHttpAndAddSchedule(const char *jsonPart)
 {
   // JSON 파싱을 위한 JsonDocument 생성
   StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
@@ -1969,7 +2075,7 @@ void parseAndAddSchedule(const char *jsonPart)
   // JSON 배열 반복하여 ScheduleDB 객체 생성 후 추가
   for (JsonObject obj : doc.as<JsonArray>())
   {
-    long idx = obj["Idx"];
+    int idx = obj["Idx"];
     String id = obj["Id"].as<String>();
     int num = obj["Num"];
     String name = obj["Name"].as<String>();
@@ -1977,8 +2083,56 @@ void parseAndAddSchedule(const char *jsonPart)
     int wmode = obj["WMode"];
     int delay = obj["Delay"];
     bool value = obj["Value"];
-    String bweeks = obj["BWeeks"].as<String>();
+    String bweeks = obj["BWeeks"].as<String>(); // 문자열로 수신됨
     bool enable = obj["Enable"];
+
+    // ScheduleDB 객체 생성 및 추가
+    ScheduleDB schedule(idx, id, num, name, time, wmode, delay, value, bweeks, enable);
+    manager.addSchedule(schedule);
+  }
+}
+
+// [MQTT] JSON 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
+void parseMqttAndAddSchedule(const char *jsonPart)
+{
+  // JSON 파싱을 위한 JsonDocument 생성
+  StaticJsonDocument<256> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  DeserializationError error = deserializeJson(doc, jsonPart);
+
+  // 파싱 오류 확인
+  if (error)
+  {
+    Serial.print(F("deserializeJson() Failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  else
+  {
+    // JSON 객체를 사용해 ScheduleDB 객체 생성
+    int idx = doc["Idx"];
+    String id = doc["Id"].as<String>();
+    int num = doc["Num"];
+    String name = doc["Name"].as<String>();
+    String time = doc["Time"].as<String>();
+    int wmode = doc["WMode"];
+    int delay = doc["Delay"];
+    bool value = doc["Value"];
+    // String bweeks = doc["BWeeks"]; // 형변환 위험: 이건 ""처럼 문자열로 받을 때 유효
+    // 실제로는 JSON 배열 형식으로 수신되기 때문에 문자열로 변환해줘야 한다.
+    // BWeeks 배열을 문자열로 변환
+    JsonArray bweeksArray = doc["BWeeks"].as<JsonArray>();
+    String bweeks = "[";                            // 배열 형식으로 시작
+    for (size_t i = 0; i < bweeksArray.size(); i++) // 배열 순회
+    {
+      if (i > 0)
+      {
+        bweeks += ","; // 항목들 사이에 쉼표 추가
+      }
+      bweeks += bweeksArray[i].as<bool>() ? "true" : "false"; // boolean 값을 문자열 "true"/"false"로 변환
+    }
+    bweeks += "]"; // 배열 형식으로 끝
+
+    bool enable = doc["Enable"];
 
     // ScheduleDB 객체 생성 및 추가
     ScheduleDB schedule(idx, id, num, name, time, wmode, delay, value, bweeks, enable);
@@ -2000,31 +2154,32 @@ void parseAndUpdateSchedule(const char *jsonPart)
     Serial.println(error.f_str());
     return;
   }
-
-  // // JSON 배열 반복하여 ScheduleDB 객체 생성 후 업데이트(교체)
-  // for (JsonObject obj : doc.as<JsonArray>())
-  // {
-  //   int idx = obj["Idx"];
-  //   String id = obj["Id"].as<String>();
-  //   int num = obj["Num"];
-  //   String name = obj["Name"].as<String>();
-  //   String time = obj["Time"].as<String>();
-  //   int wmode = obj["WMode"];
-  //   int delay = obj["Delay"];
-  //   bool value = obj["Value"];
-  //   String bweeks = obj["BWeeks"].as<String>();
-  //   bool enable = obj["Enable"];
   else
   {
+    // JSON 객체를 사용해 ScheduleDB 객체 생성
     int idx = doc["Idx"];
-    String id = doc["Id"];
+    String id = doc["Id"].as<String>();
     int num = doc["Num"];
-    String name = doc["Name"];
-    String time = doc["Time"];
+    String name = doc["Name"].as<String>();
+    String time = doc["Time"].as<String>();
     int wmode = doc["WMode"];
     int delay = doc["Delay"];
     bool value = doc["Value"];
-    String bweeks = doc["BWeeks"];
+    // String bweeks = doc["BWeeks"]; // 형변환 위험: 이건 ""처럼 문자열로 받을 때 유효
+    // 실제로는 JSON 배열 형식으로 수신되기 때문에 문자열로 변환해줘야 한다.
+    // BWeeks 배열을 문자열로 변환
+    JsonArray bweeksArray = doc["BWeeks"].as<JsonArray>();
+    String bweeks = "[";                            // 배열 형식으로 시작
+    for (size_t i = 0; i < bweeksArray.size(); i++) // 배열 순회
+    {
+      if (i > 0)
+      {
+        bweeks += ","; // 항목들 사이에 쉼표 추가
+      }
+      bweeks += bweeksArray[i].as<bool>() ? "true" : "false"; // boolean 값을 문자열 "true"/"false"로 변환
+    }
+    bweeks += "]"; // 배열 형식으로 끝
+
     bool enable = doc["Enable"];
 
     // ScheduleDB 객체 생성 및 업데이트(교체)
@@ -2058,6 +2213,73 @@ void parseAndDeleteSchedule(const char *jsonPart)
 
     // ScheduleDB 객체 삭제
     manager.deleteSchedule(idx);
+  }
+}
+
+// String "YYYY-MM-DD HH:MM:SS" 형식의 문자열을 struct tm으로 변환하는 함수
+bool stringToStructTm(const String &scheduleTimeStr, struct tm &timeStruct)
+{
+  if (scheduleTimeStr.length() != FORMAT_TIME_LEN)
+    return false; // 길이 검사 (정확한 형식 여부)
+
+  timeStruct.tm_year = scheduleTimeStr.substring(0, 4).toInt() - 1900;
+  timeStruct.tm_mon = scheduleTimeStr.substring(5, 7).toInt() - 1;
+  timeStruct.tm_mday = scheduleTimeStr.substring(8, 10).toInt();
+  timeStruct.tm_hour = scheduleTimeStr.substring(11, 13).toInt();
+  timeStruct.tm_min = scheduleTimeStr.substring(14, 16).toInt();
+  timeStruct.tm_sec = scheduleTimeStr.substring(17, 19).toInt();
+  timeStruct.tm_isdst = 0; // 서머타임 미사용
+
+  return true;
+}
+
+// 날짜 및 시간 비교 함수 (년, 월, 일, 시, 분, 초 비교)
+bool compareDate(const struct tm &currentTime, const String &scheduleTimeStr)
+{
+  struct tm scheduleTime;
+  if (!stringToStructTm(scheduleTimeStr, scheduleTime)) // String "YYYY-MM-DD HH:MM:SS" 형식의 문자열을 struct tm으로 변환
+  {
+    Serial.println("Failed to convert schedule time string");
+    return false;
+  }
+
+  return (currentTime.tm_year == scheduleTime.tm_year &&
+          currentTime.tm_mon == scheduleTime.tm_mon &&
+          currentTime.tm_mday == scheduleTime.tm_mday &&
+          currentTime.tm_hour == scheduleTime.tm_hour &&
+          currentTime.tm_min == scheduleTime.tm_min &&
+          abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
+                                                               // currentTime.tm_sec == scheduleTime.tm_sec);
+}
+
+// 시간 비교 함수 (시, 분, 초 비교)
+bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
+{
+  struct tm scheduleTime;
+  if (!stringToStructTm(scheduleTimeStr, scheduleTime)) // String "YYYY-MM-DD HH:MM:SS" 형식의 문자열을 struct tm으로 변환
+  {
+    Serial.println("Failed to convert schedule time string");
+    return false;
+  }
+
+  return (currentTime.tm_hour == scheduleTime.tm_hour &&
+          currentTime.tm_min == scheduleTime.tm_min &&
+          abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
+                                                               // currentTime.tm_sec == scheduleTime.tm_sec);
+}
+
+// Delay 값으로 레지스터 사전입력
+void Input_writingRegisters_Schedule(const ScheduleData &data)
+{
+  if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
+  {
+    writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+    writingRegisters_Schedule[3] = 0;
+  }
+  else if (data.delay > 0)
+  {
+    writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
+    writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
   }
 }
 
@@ -2849,16 +3071,22 @@ void setup()
 
             // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
             const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
+            if (jsonPart == NULL)
+            {
+              DebugSerial.println("Cannot find JSON data...");
+            }
+            else
+            {
+              // http메시지 저장 로직 넣기
+              parseHttpAndAddSchedule(jsonPart);
 
-            // http메시지 저장 로직 넣기
-            parseAndAddSchedule(jsonPart);
+              httpRecvOK = true;
 
-            httpRecvOK = true;
+              // 디버그 모든 스케줄 출력
+              manager.printAllSchedules();
 
-            // 디버그 모든 스케줄 출력
-            manager.printAllSchedules();
-
-          } // if jsonStart null
+            } // if jsonPart == NULL
+          } // if jsonStart == NULL
         } // if TYPE1SC.socketRecv()
         else
         {
@@ -3000,6 +3228,15 @@ void setup()
     {
       Serial.println("Failed to create log queue");
       return;
+    }
+
+    // scheduleQueue 생성, 최대 10개의 ScheduleData 항목을 보관할 수 있습니다.
+    scheduleQueue = xQueueCreate(10, sizeof(ScheduleData));
+
+    // 큐 생성에 실패한 경우 처리
+    if (scheduleQueue == NULL)
+    {
+      Serial.println("Failed to create schedule queue");
     }
 
     // NTP 동기화 태스크 생성
