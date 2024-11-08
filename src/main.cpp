@@ -1208,8 +1208,16 @@ void postTransmission()
 // mqtt 메시지 수신 콜백
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  byte *p = (byte *)malloc(length); // payload 길이만큼 바이트 단위 메모리 동적할당
-  memcpy(p, payload, length);       // payload를 메모리에 복사
+  readingStatusRegister[0] = 0;
+  writingRegisters[0] = 0;
+  writingRegisters[2] = 0; // mapping write
+  writingRegisters[3] = 0; // delay time
+
+  writingRegisters_Expand[1] = 0; // Expand Mapping
+  writingRegisters_Expand[2] = 0; // Expand write
+
+  payloadBuffer = "";
+  rStr = nullptr;
 
   // unsigned int delayTime = atoi((char *)p); // 릴레이 딜레이타임
 
@@ -1224,45 +1232,21 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   DebugSerial.println();
 
-  // 아직 사용 안하는 기능 240508
-  // payload에 'on', 'off', 'dis'문자열이 포함되어 있는지 확인
-  // 포함되어있다면 ext_led high/low; AT mode
-  // if (strstr((char *)p, "on"))
-  // {
-  //   digitalWrite(EXT_LED, HIGH);
-  //   client.publish(PUB_TOPIC, p, length);
-  // }
-  // else if (strstr((char *)p, "off"))
-  // {
-  //   digitalWrite(EXT_LED, LOW);
-  //   client.publish(PUB_TOPIC, p, length);
-  // }
-  // else if (strstr((char *)p, "dis"))
-  // {
-  //   PPPOS_stop();
-  //   atMode = true;
-  //   if (TYPE1SC.setAT() == 0)
-  //   {
-  //     DebugSerial.println("Command Mode");
-  //   }
-  //   else
-  //   {
-  //     atMode = false;
-  //   }
-  // }
-
   // 메시지 스플릿 - 페이로드 파싱
   // p가 가리키는 값을 payloadBuffer에 복사
   for (unsigned int i = 0; i < length; i++)
   {
-    payloadBuffer += (char)p[i]; // payload 버퍼 - Split 파싱에 사용
+    payloadBuffer += (char)payload[i]; // payloadBuffer - Split 파싱에 사용
   }
+  // DebugSerial.print("payloadBuffer: ");
   // DebugSerial.println(payloadBuffer);
 
   int cnt = 0;
   rStr = Split(payloadBuffer, '&', &cnt);
 
+  // DebugSerial.print("rStr[0]: ");
   // DebugSerial.println(rStr[0]); // on/off
+  // DebugSerial.print("rStr[1]: ");
   // DebugSerial.println(rStr[1]); // delayTime
   // DebugSerial.println(isNumeric(rStr[1]));
 
@@ -1288,32 +1272,31 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 0; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
-
     else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
     {
       suffix = "/r02"; // 추가할 문자열을 설정
       index_relay = 1; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
     {
@@ -1321,15 +1304,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 2; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
     {
@@ -1337,15 +1320,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 3; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
     {
@@ -1353,15 +1336,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 4; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
     {
@@ -1369,15 +1352,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 5; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
     {
@@ -1385,15 +1368,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 6; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
     else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
     {
@@ -1401,15 +1384,15 @@ void callback(char *topic, byte *payload, unsigned int length)
       index_relay = 7; // r1~r8: 0~7
 
       allowsModbusTask_Relay = true;
-      while (allowsModbusTask_Relay)
-      {
-        delay(1);
-      }
-      if (allowsPublishNewTopic)
-      {
-        publishNewTopic();
-        allowsPublishNewTopic = false;
-      }
+      // while (allowsModbusTask_Relay)
+      // {
+      //   delay(1);
+      // }
+      // if (allowsPublishNewTopic)
+      // {
+      //   publishNewTopic();
+      //   allowsPublishNewTopic = false;
+      // }
     }
 
     // 8채널이 아닐 때 (16채널 이상)
@@ -1422,15 +1405,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 8; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r10")) // 릴레이 채널 10 (인덱스 9)
       {
@@ -1438,15 +1421,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 9; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r11")) // 릴레이 채널 11 (인덱스 10)
       {
@@ -1454,15 +1437,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 10; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r12")) // 릴레이 채널 12 (인덱스 11)
       {
@@ -1470,15 +1453,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 11; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r13")) // 릴레이 채널 13 (인덱스 12)
       {
@@ -1486,15 +1469,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 12; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r14")) // 릴레이 채널 14 (인덱스 13)
       {
@@ -1502,15 +1485,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 13; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r15")) // 릴레이 채널 15 (인덱스 14)
       {
@@ -1518,15 +1501,15 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 14; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
       else if (strstr(topic, "/r16")) // 릴레이 채널 16 (인덱스 15)
       {
@@ -1534,18 +1517,18 @@ void callback(char *topic, byte *payload, unsigned int length)
         index_relay = 15; // r1~r16: 0~15
 
         allowsModbusTask_Relay = true;
-        while (allowsModbusTask_Relay)
-        {
-          delay(1);
-        }
-        if (allowsPublishNewTopic)
-        {
-          publishNewTopic();
-          allowsPublishNewTopic = false;
-        }
+        // while (allowsModbusTask_Relay)
+        // {
+        //   delay(1);
+        // }
+        // if (allowsPublishNewTopic)
+        // {
+        //   publishNewTopic();
+        //   allowsPublishNewTopic = false;
+        // }
       }
-    }
-  }
+    } // else if (relayId != "relayId_8ch")
+  } // if (isNumeric(rStr[1]))
   else if (rStr[0] == "refresh")
   {
     allowsModbusTask_Relay = true;
@@ -1561,11 +1544,48 @@ void callback(char *topic, byte *payload, unsigned int length)
       allowsPublishStatus = false;
     }
   }
-
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
   {
     DebugSerial.println("Payload arrived, But has invalid value: delayTime");
     // 아무것도 하지 않음
+  }
+
+  if (strstr(topic, "/ResAddSch")) // 스케줄 추가 기능 수행
+  {
+    // 파싱-데이터저장-기능수행
+    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseMqttAndAddSchedule(jsonPart);
+    }
+  }
+  else if (strstr(topic, "/ResUpdateSch")) // 스케줄 수정 기능 수행
+  {
+    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseAndUpdateSchedule(jsonPart);
+    }
+  }
+  else if (strstr(topic, "/ResDelSch")) // 스케줄 삭제 기능 수행
+  {
+    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseAndDeleteSchedule(jsonPart);
+    }
   }
 
   // DebugSerial.print("readingStatusRegister: ");
@@ -1595,20 +1615,6 @@ void callback(char *topic, byte *payload, unsigned int length)
   // testMsg5 = "";
 
   // testBit = -1;
-
-  readingStatusRegister[0] = 0;
-  writingRegisters[2] = 0; // mapping write
-  writingRegisters[3] = 0; // delay time
-
-  writingRegisters_Expand[1] = 0; // Expand Mapping
-  writingRegisters_Expand[2] = 0; // Expand write
-
-  payloadBuffer = "";
-  rStr[0] = "";
-  rStr[1] = "";
-  free(p);
-  // DebugSerial.println("free memory");
-  // DebugSerial.println();
 }
 
 // PPPOS 연결 시작
@@ -1688,7 +1694,7 @@ void publishNewTopic()
   // DebugSerial.println(new_PUB_TOPIC);
   // DebugSerial.println(payloadBuffer.c_str());
 
-  payloadBuffer = "";
+  // payloadBuffer = "";
   free(new_PUB_TOPIC);
 }
 
