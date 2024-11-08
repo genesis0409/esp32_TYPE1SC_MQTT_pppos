@@ -409,6 +409,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
@@ -435,7 +436,6 @@ void ModbusTask_Relay_8ch(void *pvParameters)
       {
         uint16_t selector_relay = BIT_SELECT << index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
 
-        // if (strstr((char *)p, "on"))
         if (strstr(payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
         {
           if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
@@ -447,7 +447,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             writingRegisters[2] = index_relay << 1 | BIT_ON; // 명시적 OR
           }
         }
-        if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+        else if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
         {
           if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
           {
@@ -459,7 +459,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           }
         }
 
-        // Write Relay
+        // Write Buffer
         if (modbus.setTransmitBuffer(0x00, writingRegisters[0]) == 0) // Write Type
         {
           // testMsg1 = "ok";
@@ -476,6 +476,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         {
           // testMsg4 = "ok";
         }
+
+        // Write Relay
         modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
         // DebugSerial.print("modbus_Relay_result: ");
         // DebugSerial.println(modbus_Relay_result);
@@ -484,7 +486,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
-          allowsPublishNewTopic = true;
+          // allowsPublishNewTopic = true;
         }
         else
         {
@@ -527,6 +529,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
   // Auto FlowControl - NULL
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
@@ -553,7 +556,6 @@ void ModbusTask_Relay_16ch(void *pvParameters)
       {
         uint16_t selector_relay = BIT_SELECT << index_relay; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
 
-        // if (strstr((char *)p, "on"))
         if (strstr(payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
         {
           // rStr[1].toInt() == 0 : 단순 on/off
@@ -567,7 +569,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             writingRegisters[2] = index_relay << 1 | BIT_ON; // 명시적 OR
           }
         }
-        if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+        else if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
         {
           // rStr[1].toInt() == 0 : 단순 on/off
           if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
@@ -581,7 +583,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           }
         }
 
-        // Write Relay
+        // Write Buffer: No Delay
         if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
         {
           if (modbus.setTransmitBuffer(0x00, writingRegisters_Expand[0]) == 0) // Expand Write Status Group
@@ -596,12 +598,16 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           {
             // testMsg3 = "ok";
           }
+
+          // Write Relay: No Delay
           modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
           // DebugSerial.print("modbus_Relay_result: ");
           // DebugSerial.println(modbus_Relay_result);
-        }
+
+        } // if No Delay
         else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
         {
+          // Write Buffer: Delay
           if (modbus.setTransmitBuffer(0x00, writingRegisters[0]) == 0) // Write Type
           {
             // testMsg1 = "ok";
@@ -618,6 +624,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           {
             // testMsg4 = "ok";
           }
+
+          // Write Relay: Delay
           modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
           // DebugSerial.print("modbus_Relay_result: ");
           // DebugSerial.println(modbus_Relay_result);
@@ -627,7 +635,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
-          allowsPublishNewTopic = true;
+          // allowsPublishNewTopic = true;
         }
         else
         {
