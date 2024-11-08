@@ -2849,6 +2849,34 @@ void setup()
               DebugSerial.println("TCP Socket Create!!!");
             }
 
+          INFO_LOGIN:
+
+            /* 2 :TCP Socket Activation */
+            if (TYPE1SC.socketActivate() == 0)
+            {
+              DebugSerial.println("TCP Socket Activation!!!");
+#if defined(USE_LCD)
+              u8x8log.print("TCP Socket Activation!!!\n");
+#endif
+            }
+
+            if (TYPE1SC.socketInfo(sckInfo, sizeof(sckInfo)) == 0)
+            {
+              DebugSerial.print("Socket Info : ");
+              DebugSerial.println(sckInfo);
+#if defined(USE_LCD)
+              u8x8log.print("Socket Info : ");
+              u8x8log.print(sckInfo);
+              u8x8log.print("\n");
+#endif
+
+              if (strcmp(sckInfo, "ACTIVATED"))
+              {
+                delay(3000);
+                goto INFO_LOGIN;
+              }
+            }
+
             break;
           }
           else
@@ -3148,7 +3176,7 @@ void setup()
       }
 
       httpTryCount = 0; // http 통신 시도 횟수 초기화
-    }
+    } // if (farmtalkServerLoginResult == 0)
 
     /* 6 :TCP Socket DeActivation */
     if (TYPE1SC.socketClose() == 0)
