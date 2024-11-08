@@ -302,6 +302,9 @@ uint16_t writingRegisters_Expand[3] = {(const uint16_t)0, 0, 0}; // 각 2바이�
 uint16_t readingRegister[3] = {0, 0, 0};                         // 온습도, 감우, ec 등 읽기용
 uint16_t readingStatusRegister[1] = {0};                         // refresh 메시지: 상태 반환용
 
+uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0};     // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
+uint16_t writingRegisters_Expand_Schedule[3] = {(const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
+
 uint8_t index_relay; // r1~r8: 0~7
 
 // callback or loop 에서 modbus task를 실행 결정
@@ -323,13 +326,15 @@ bool allowsModbusTask_Relay = false;
 // bool isSelectedModbusTask_Sensor_soil = false;
 
 // 각 node task
-void ModbusTask_Relay_8ch(void *pvParameters);    // Task에 등록할 modbus relay 제어
-void ModbusTask_Relay_16ch(void *pvParameters);   // Task에 등록할 modbus relay 제어
-void ModbusTask_Sensor_th(void *pvParameters);    // 온습도 센서 task
-void ModbusTask_Sensor_tm100(void *pvParameters); // TM100 task
-void ModbusTask_Sensor_rain(void *pvParameters);  // 감우 센서 task
-void ModbusTask_Sensor_ec(void *pvParameters);    // 지온·지습·EC 센서 task
-void ModbusTask_Sensor_soil(void *pvParameters);  // 수분장력 센서 task
+void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
+void ModbusTask_Relay_16ch(void *pvParameters);          // Task에 등록할 modbus relay 제어
+void ModbusTask_Relay_8ch_Schedule(void *pvParameters);  // 스케줄에 의한 modbus relay 제어
+void ModbusTask_Relay_16ch_Schedule(void *pvParameters); // 스케줄에 의한 modbus relay 제어
+void ModbusTask_Sensor_th(void *pvParameters);           // 온습도 센서 task
+void ModbusTask_Sensor_tm100(void *pvParameters);        // TM100 task
+void ModbusTask_Sensor_rain(void *pvParameters);         // 감우 센서 task
+void ModbusTask_Sensor_ec(void *pvParameters);           // 지온·지습·EC 센서 task
+void ModbusTask_Sensor_soil(void *pvParameters);         // 수분장력 센서 task
 
 void TimeTask_NTPSync(void *pvParameters);         // NTP 서버와 시간을 동기화하는 task
 void TimeTask_ESP_Update_Time(void *pvParameters); // ESP32 내부 타이머로 시간 업데이트하는 태스크
@@ -503,6 +508,108 @@ void ModbusTask_Relay_8ch(void *pvParameters)
   }
 }
 
+void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
+{
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Relay_result = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
+  /* Serial1 Initialization */
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+
+  ScheduleData data;
+
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  while (1)
+  {
+    // 스케줄 작업에 의한 릴레이 제어
+    if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
+    {
+      // 릴레이 제어 작업
+      Input_writingRegisters_Schedule(data);                                                  // 사전입력
+      uint8_t index_relay_Schedule = data.num - 1;                                            // [스케줄 제어용] num: 1~; index: 0~
+      uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+
+      if (data.value == true) // ON 동작이면
+      {
+        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+        {
+          writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_ON << index_relay_Schedule;
+        }
+        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        {
+          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
+        }
+      }
+      else if (data.value == false) // OFF 동작이면
+      {
+        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+        {
+          writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_OFF << index_relay_Schedule;
+        }
+        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        {
+          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
+        }
+      }
+
+      // Write Buffer
+      if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
+      {
+        // testMsg1 = "ok";
+      }
+      if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
+      {
+        // testMsg2 = "ok";
+      }
+      if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
+      {
+        // testMsg3 = "ok";
+      }
+      if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
+      {
+        // testMsg4 = "ok";
+      }
+
+      // Write Relay
+      modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
+      // DebugSerial.print("modbus_Relay_result: ");
+      // DebugSerial.println(modbus_Relay_result);
+
+      if (modbus_Relay_result == modbus.ku8MBSuccess)
+      {
+        // DebugSerial.println("MODBUS Writing done.");
+        // testMsg5 = "ok";
+        // allowsPublishNewTopic = true;
+      }
+      else
+      {
+        // testBit = modbus_Relay_result;
+      }
+    } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
 // pppos client task보다 우선하는 modbus task
 void ModbusTask_Relay_16ch(void *pvParameters)
 {
@@ -646,7 +753,138 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
         allowsModbusTask_Relay = false;
       }
-    }
+    } // if (allowsModbusTask_Relay)
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+// pppos client task보다 우선하는 modbus task
+void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
+{
+  // HardwareSerial SerialPort(1); // use ESP32 UART1
+  ModbusMaster modbus;
+
+  modbus_Relay_result = modbus.ku8MBInvalidCRC;
+
+  // RS485 Setup
+  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
+  pinMode(dePin, OUTPUT);
+  pinMode(rePin, OUTPUT);
+
+  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
+  digitalWrite(dePin, LOW);
+  digitalWrite(rePin, LOW);
+
+  /* Serial1 Initialization */
+  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+  // Modbus slave ID 1
+  modbus.begin(slaveId_relay, SerialPort);
+
+  // Callbacks allow us to configure the RS485 transceiver correctly
+  // Auto FlowControl - NULL
+  modbus.preTransmission(preTransmission);
+  modbus.postTransmission(postTransmission);
+
+  ScheduleData data;
+
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  while (1)
+  {
+    // 스케줄 작업에 의한 릴레이 제어
+    if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
+    {
+
+      // 릴레이 제어 작업 (확장 주소 사용)
+      Input_writingRegisters_Schedule(data);                                 // 사전입력
+      uint8_t index_relay_Schedule = data.num - 1;                           // [스케줄 제어용] num: 1~; index: 0~
+      uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+
+      if (data.value == true) // ON 동작이면
+      {
+        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+        {
+          writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
+          writingRegisters_Expand_Schedule[2] = BIT_ON << index_relay_Schedule;
+        }
+        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        {
+          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
+        }
+      }
+      else if (data.value == false) // OFF 동작이면
+      {
+        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+        {
+          writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
+          writingRegisters_Expand_Schedule[2] = BIT_OFF << index_relay_Schedule;
+        }
+        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        {
+          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
+        }
+      }
+
+      // Write Buffer: No Delay
+      if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
+      {
+        if (modbus.setTransmitBuffer(0x00, writingRegisters_Expand_Schedule[0]) == 0) // Expand Write Status Group
+        {
+          // testMsg1 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x01, writingRegisters_Expand_Schedule[1]) == 0) // Expand Write Relay Mask
+        {
+          // testMsg2 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x02, writingRegisters_Expand_Schedule[2]) == 0) // Expand Write Relay
+        {
+          // testMsg3 = "ok";
+        }
+
+        // Write Relay: No Delay
+        modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
+        // DebugSerial.print("modbus_Relay_result: ");
+        // DebugSerial.println(modbus_Relay_result);
+
+      } // if No Delay
+      else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+      {
+        // Write Buffer: Delay
+        if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
+        {
+          // testMsg1 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
+        {
+          // testMsg2 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
+        {
+          // testMsg3 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
+        {
+          // testMsg4 = "ok";
+        }
+
+        // Write Relay: Delay
+        modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
+        // DebugSerial.print("modbus_Relay_result: ");
+        // DebugSerial.println(modbus_Relay_result);
+      }
+
+      if (modbus_Relay_result == modbus.ku8MBSuccess)
+      {
+        // DebugSerial.println("MODBUS Writing done.");
+        // testMsg5 = "ok";
+        // allowsPublishNewTopic = true;
+      }
+      else
+      {
+        // testBit = modbus_Relay_result;
+      }
+    } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
