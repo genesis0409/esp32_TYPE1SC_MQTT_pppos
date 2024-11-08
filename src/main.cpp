@@ -932,7 +932,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(12000 / portTICK_PERIOD_MS);
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   do
   {
@@ -1015,7 +1015,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(12000 / portTICK_PERIOD_MS);
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   do
   {
@@ -1099,7 +1099,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(12000 / portTICK_PERIOD_MS);
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   do
   {
@@ -1200,7 +1200,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
 
-  vTaskDelay(12000 / portTICK_PERIOD_MS);
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   do
   {
@@ -3527,18 +3527,19 @@ void setup()
     // NTP 동기화 태스크 생성
     xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
-    // 내부 타이머로 시간 업데이트하는 태스크 생성
-    xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 2048, NULL, 8, NULL);
+    // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 태스크 생성
+    xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 2048, NULL, 6, NULL);
 
     // 로그 출력 태스크 생성
-    xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 8, NULL);
+    xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 4, NULL);
 
     if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
     {
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_8ch, "ModbusTask_Relay_8ch", 2048, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_8ch, "ModbusTask_Relay_8ch", 2048, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "ModbusTask_Relay_8ch_Schedule", 2048, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     if (relayId == "relayId_16ch")
@@ -3546,7 +3547,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_16ch, "ModbusTask_Relay_16ch", 2048, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_16ch, "ModbusTask_Relay_16ch", 2048, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "ModbusTask_Relay_16ch_Schedule", 2048, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     // // 각 센서 ID와 해당하는 Slave ID 변수, Task 함수를 매핑한 배열입니다.
