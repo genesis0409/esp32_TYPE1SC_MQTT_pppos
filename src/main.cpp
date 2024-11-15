@@ -94,13 +94,13 @@ String code_sen2;
 // HTTP 통신 관련 변수
 char IPAddr[32];
 char sckInfo[128];
-char recvBuffer[700];
+char recvBuffer[2048];
 int recvSize;
 bool httpRecvOK = false;               // http 메시지 수신 여부
 uint8_t httpTryCount = 0;              // http 통신 시도 횟수
 const uint8_t httpTryLimit = 3;        // http 통신 시도 한계 횟수
 bool farmtalkServerResult = false;     // 서버 발 사용자 등록 결과
-int farmtalkServerLoginResult = -1;    // 서버 발 사용자 로그인 결과
+int farmtalkServerLoginResult = -1;    // 서버 발 사용자 로그인 결과; 0이면 성공
 int farmtalkServerScheduleResult = -1; // 서버 발 스케줄 정보 수신 결과
 
 void getTime(); // 시간 정보 업데이트 함수
@@ -2882,6 +2882,8 @@ void setup()
               if (farmtalkServerResult == false)
               {
                 httpRecvOK = true;
+                // [구현 완료] 이미 존재하는 사용자 * BROKER 정보가 없는 ESP 조합이면 어떻게해?
+                // 일단 보내고 로그인 영역에서 BROKER 정보 파일쓰기
               }
               else // 사용자 등록 성공
               {
@@ -2942,7 +2944,8 @@ void setup()
 
     httpRecvOK = false; // http 메시지 수신 여부 초기화
 
-    if (BROKER_ID != "" && BROKER_PORT != "") // BROKER_ID와 BROKER_PORT가 존재하면 (==생성로직을 한번 탔으면)
+    // [미구현] farmtalkServerResult == false면 무조건 이미 존재하는 사용자라고 간주
+    if (farmtalkServerResult == false || (BROKER_ID != "" && BROKER_PORT != "")) // 이미 존재하는 사용자거나 BROKER_ID와 BROKER_PORT가 존재하면 (==생성로직을 한번 탔으면)
     {
       // 로그인 http 로직 수행
       DebugSerial.print("[ALERT] Log In Process...");
@@ -3095,18 +3098,42 @@ void setup()
             {
               // "result" 값 추출
               farmtalkServerLoginResult = doc["result"];
+              const char *host = doc["host"];
+              int port = doc["port"];
 
               // 결과 출력
               DebugSerial.print("Login result: ");
-              DebugSerial.println(farmtalkServerLoginResult);
+              DebugSerial.println(farmtalkServerLoginResult == 0 ? "true" : String(farmtalkServerLoginResult));
+              DebugSerial.print("host: ");
+              DebugSerial.println(host);
+              DebugSerial.print("port: ");
+              DebugSerial.println(port);
 
               // result가 0이 아니면 로그인 실패
               if (farmtalkServerLoginResult != 0)
               {
                 httpRecvOK = true;
+                // [미구현] 로그인 실패 시 뭘 하면 되지?
               }
               else // result==0 이면 사용자 로그인 성공
               {
+                if (BROKER_ID == "" || BROKER_PORT == "") // 이미 존재하는 사용자의 경우(DB생성실패 및 로그인 성공)
+                {
+                  // 수신된 정보를 MQTT 변수에 할당
+                  BROKER_ID = host;
+                  BROKER_PORT = port;
+
+                  // ESP32 Flash Memory에 기록
+                  writeFile(SPIFFS, BROKER_IDPath, BROKER_ID.c_str());
+                  writeFile(SPIFFS, BROKER_PORTPath, BROKER_PORT.c_str());
+
+                  // 디버깅
+                  DebugSerial.print("BROKER_ID in BROKER_IDPath: ");
+                  DebugSerial.println(readFile(SPIFFS, BROKER_IDPath));
+                  DebugSerial.print("BROKER_PORT in BROKER_PORTPath: ");
+                  DebugSerial.println(readFile(SPIFFS, BROKER_PORTPath));
+                }
+
                 httpRecvOK = true;
               }
             } // if json error
