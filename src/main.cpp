@@ -540,6 +540,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
 
+  uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   ScheduleData data;
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -549,10 +550,20 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
     // 스케줄 작업에 의한 릴레이 제어
     if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
     {
-      // 릴레이 제어 작업
-      Input_writingRegisters_Schedule(data);                                                  // 사전입력
       uint8_t index_relay_Schedule = data.num - 1;                                            // [스케줄 제어용] num: 1~; index: 0~
       uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+
+      // 릴레이 제어 작업
+      if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
+      {
+        writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+        writingRegisters_Schedule[3] = 0;
+      }
+      else if (data.delay > 0)
+      {
+        writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
+        writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
+      }
 
       if (data.value == true) // ON 동작이면
       {
@@ -629,7 +640,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
       }
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
@@ -838,6 +849,8 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
 
+  uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0};     // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
+  uint16_t writingRegisters_Expand_Schedule[3] = {(const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
   ScheduleData data;
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -847,11 +860,20 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
     // 스케줄 작업에 의한 릴레이 제어
     if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
     {
-
-      // 릴레이 제어 작업 (확장 주소 사용)
-      Input_writingRegisters_Schedule(data);                                 // 사전입력
       uint8_t index_relay_Schedule = data.num - 1;                           // [스케줄 제어용] num: 1~; index: 0~
       uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+
+      // 릴레이 제어 작업 (확장 주소 사용)
+      if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
+      {
+        writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+        writingRegisters_Schedule[3] = 0;
+      }
+      else if (data.delay > 0)
+      {
+        writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
+        writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
+      }
 
       if (data.value == true) // ON 동작이면
       {
@@ -955,7 +977,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
       }
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
