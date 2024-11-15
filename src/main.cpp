@@ -270,6 +270,11 @@ bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr);
 
 // RS485 setting **********************************************************************************
 // #define SLAVE_ID 1
+#define BIT_SELECT 1 // 릴레이 채널 선택 비트
+#define BIT_ON 1
+#define BIT_OFF 0
+#define SHIFT_CONSTANT 8 // 비트 쉬프트 연산
+
 #define WRITE_START_ADDRESS 3 // 8ch 릴레이 전반 및 모든 릴레이 Delay 쓰기 전용
 #define WRITE_QUANTITY 4
 #define EXPAND_WRITE_START_ADDRESS 7 // 16ch 이상 릴레이 단순 on/off 쓰기 전용
@@ -297,33 +302,16 @@ uint8_t modbus_Sensor_result_soil;
 
 // void checkModbusErrorStatus();
 
-uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0};     // 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
-uint16_t writingRegisters_Expand[3] = {(const uint16_t)0, 0, 0}; // 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
-uint16_t readingRegister[3] = {0, 0, 0};                         // 온습도, 감우, ec 등 읽기용
-uint16_t readingStatusRegister[1] = {0};                         // refresh 메시지: 상태 반환용
-
-uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0};     // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
-uint16_t writingRegisters_Expand_Schedule[3] = {(const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
-
-uint8_t index_relay; // r1~r8: 0~7
-
-// callback or loop 에서 modbus task를 실행 결정
-bool allowsModbusTask_Relay = false;
-// bool allowsModbusTask_Sensor = false;
-
-// 선택한 센서의 task를 실행여부 결정
-// bool allowsModbusTask_Sensor_th = false;
-// bool allowsModbusTask_Sensor_tm100 = false;
-// bool allowsModbusTask_Sensor_rain = false;
-// bool allowsModbusTask_Sensor_ec = false;
-// bool allowsModbusTask_Sensor_soil = false;
-
-// 선택한 센서의 task가 선택되었는지 여부 - 한번 선택되면 불변해야함
-// bool isSelectedModbusTask_Sensor_th = false;
-// bool isSelectedModbusTask_Sensor_tm100 = false;
-// bool isSelectedModbusTask_Sensor_rain = false;
-// bool isSelectedModbusTask_Sensor_ec = false;
-// bool isSelectedModbusTask_Sensor_soil = false;
+struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
+{
+  uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0};     // 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
+  uint16_t writingRegisters_Expand[3] = {(const uint16_t)0, 0, 0}; // 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
+  String payloadBuffer;
+  String *rStr = nullptr; // 파싱된 문자열 저장변수
+  String suffix;          // 추가할 문자열을 설정
+  uint8_t index_relay;    // r1~r8: 0~7
+};
+QueueHandle_t modbusQueue; // Task와 콜백 함수에서 데이터를 교환하기 위한 Queue를 생성
 
 // 각 node task
 void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
@@ -415,14 +403,21 @@ void ModbusTask_Relay_8ch(void *pvParameters)
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
 
+  ModbusData receivedData;
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
   {
-    if (allowsModbusTask_Relay) // callback에서 허용해줌
+    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
     {
+      // Queue에서 데이터를 받아 처리
+      uint16_t localWritingRegisters[4];
+      memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
+      uint16_t readingStatusRegister[1] = {0}; // refresh 메시지: 상태 반환용
+
       // refresh 메시지일 경우 릴레이 상태 업데이트
-      if (rStr[0] == "refresh")
+      if (receivedData.rStr[0] == "refresh")
       {
         // relay status
         modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03
@@ -439,45 +434,45 @@ void ModbusTask_Relay_8ch(void *pvParameters)
       // (r1~r8) 일반적인 릴레이 제어 작업
       else
       {
-        uint16_t selector_relay = BIT_SELECT << index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+        uint16_t selector_relay = BIT_SELECT << receivedData.index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
 
-        if (strstr(payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
+        if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
         {
-          if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
           {
-            writingRegisters[2] = selector_relay | BIT_ON << index_relay;
+            localWritingRegisters[2] = selector_relay | BIT_ON << receivedData.index_relay;
           }
-          else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
           {
-            writingRegisters[2] = index_relay << 1 | BIT_ON; // 명시적 OR
+            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
           }
         }
-        else if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+        else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
         {
-          if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
           {
-            writingRegisters[2] = selector_relay | BIT_OFF << index_relay;
+            localWritingRegisters[2] = selector_relay | BIT_OFF << receivedData.index_relay;
           }
-          else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
           {
-            writingRegisters[2] = index_relay << 1 | BIT_OFF; // 명시적 OR
+            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
           }
         }
 
         // Write Buffer
-        if (modbus.setTransmitBuffer(0x00, writingRegisters[0]) == 0) // Write Type
+        if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
         {
           // testMsg1 = "ok";
         }
-        if (modbus.setTransmitBuffer(0x01, writingRegisters[1]) == 0) // Write PW
+        if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
         {
           // testMsg2 = "ok";
         }
-        if (modbus.setTransmitBuffer(0x02, writingRegisters[2]) == 0) // Write Relay
+        if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
         {
           // testMsg3 = "ok";
         }
-        if (modbus.setTransmitBuffer(0x03, writingRegisters[3]) == 0) // Write Time
+        if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
         {
           // testMsg4 = "ok";
         }
@@ -502,7 +497,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
         allowsModbusTask_Relay = false;
       }
-    }
+    } // if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
@@ -637,14 +632,23 @@ void ModbusTask_Relay_16ch(void *pvParameters)
   modbus.preTransmission(preTransmission);
   modbus.postTransmission(postTransmission);
 
+  ModbusData receivedData;
+
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
   {
-    if (allowsModbusTask_Relay) // callback에서 허용해줌
+    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
     {
+      // Queue에서 데이터를 받아 처리
+      uint16_t localWritingRegisters[4];
+      memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
+      uint16_t localWritingRegisters_Expand[4];
+      memcpy(localWritingRegisters_Expand, receivedData.writingRegisters_Expand, sizeof(localWritingRegisters_Expand));
+      uint16_t readingStatusRegister[1] = {0}; // refresh 메시지: 상태 반환용
+
       // refresh 메시지일 경우 릴레이 상태 업데이트
-      if (rStr[0] == "refresh")
+      if (receivedData.rStr[0] == "refresh")
       {
         // relay status
         modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
@@ -661,47 +665,47 @@ void ModbusTask_Relay_16ch(void *pvParameters)
       // (r1~r16) 일반적인 릴레이 제어 작업 (확장 주소 사용)
       else
       {
-        uint16_t selector_relay = BIT_SELECT << index_relay; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+        uint16_t selector_relay = BIT_SELECT << receivedData.index_relay; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
 
-        if (strstr(payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
+        if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
         {
           // rStr[1].toInt() == 0 : 단순 on/off
-          if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
           {
-            writingRegisters_Expand[1] = selector_relay;
-            writingRegisters_Expand[2] = BIT_ON << index_relay;
+            localWritingRegisters_Expand[1] = selector_relay;
+            localWritingRegisters_Expand[2] = BIT_ON << receivedData.index_relay;
           }
-          else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
           {
-            writingRegisters[2] = index_relay << 1 | BIT_ON; // 명시적 OR
+            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
           }
         }
-        else if (strstr(payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+        else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
         {
           // rStr[1].toInt() == 0 : 단순 on/off
-          if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
           {
-            writingRegisters_Expand[1] = selector_relay;
-            writingRegisters_Expand[2] = BIT_OFF << index_relay;
+            localWritingRegisters_Expand[1] = selector_relay;
+            localWritingRegisters_Expand[2] = BIT_OFF << receivedData.index_relay;
           }
-          else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
           {
-            writingRegisters[2] = index_relay << 1 | BIT_OFF; // 명시적 OR
+            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
           }
         }
 
         // Write Buffer: No Delay
-        if (writingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
+        if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
         {
-          if (modbus.setTransmitBuffer(0x00, writingRegisters_Expand[0]) == 0) // Expand Write Status Group
+          if (modbus.setTransmitBuffer(0x00, localWritingRegisters_Expand[0]) == 0) // Expand Write Status Group
           {
             // testMsg1 = "ok";
           }
-          if (modbus.setTransmitBuffer(0x01, writingRegisters_Expand[1]) == 0) // Expand Write Relay Mask
+          if (modbus.setTransmitBuffer(0x01, localWritingRegisters_Expand[1]) == 0) // Expand Write Relay Mask
           {
             // testMsg2 = "ok";
           }
-          if (modbus.setTransmitBuffer(0x02, writingRegisters_Expand[2]) == 0) // Expand Write Relay
+          if (modbus.setTransmitBuffer(0x02, localWritingRegisters_Expand[2]) == 0) // Expand Write Relay
           {
             // testMsg3 = "ok";
           }
@@ -712,22 +716,22 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           // DebugSerial.println(modbus_Relay_result);
 
         } // if No Delay
-        else if (writingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
         {
           // Write Buffer: Delay
-          if (modbus.setTransmitBuffer(0x00, writingRegisters[0]) == 0) // Write Type
+          if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
           {
             // testMsg1 = "ok";
           }
-          if (modbus.setTransmitBuffer(0x01, writingRegisters[1]) == 0) // Write PW
+          if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
           {
             // testMsg2 = "ok";
           }
-          if (modbus.setTransmitBuffer(0x02, writingRegisters[2]) == 0) // Write Relay
+          if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
           {
             // testMsg3 = "ok";
           }
-          if (modbus.setTransmitBuffer(0x03, writingRegisters[3]) == 0) // Write Time
+          if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
           {
             // testMsg4 = "ok";
           }
@@ -753,7 +757,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
         allowsModbusTask_Relay = false;
       }
-    } // if (allowsModbusTask_Relay)
+    } // if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
@@ -1459,18 +1463,7 @@ void postTransmission()
 // mqtt 메시지 수신 콜백
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  readingStatusRegister[0] = 0;
-  writingRegisters[0] = 0;
-  writingRegisters[2] = 0; // mapping write
-  writingRegisters[3] = 0; // delay time
-
-  writingRegisters_Expand[1] = 0; // Expand Mapping
-  writingRegisters_Expand[2] = 0; // Expand write
-
-  payloadBuffer = "";
-  rStr = nullptr;
-
-  // unsigned int delayTime = atoi((char *)p); // 릴레이 딜레이타임
+  ModbusData modbusData;
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
@@ -1487,13 +1480,13 @@ void callback(char *topic, byte *payload, unsigned int length)
   // p가 가리키는 값을 payloadBuffer에 복사
   for (unsigned int i = 0; i < length; i++)
   {
-    payloadBuffer += (char)payload[i]; // payloadBuffer - Split 파싱에 사용
+    modbusData.payloadBuffer += (char)payload[i]; // payloadBuffer - Split 파싱에 사용
   }
   // DebugSerial.print("payloadBuffer: ");
-  // DebugSerial.println(payloadBuffer);
+  // DebugSerial.println(modbusData.payloadBuffer);
 
-  int cnt = 0;
-  rStr = Split(payloadBuffer, '&', &cnt);
+  int cnt = 0; // Split()으로 분할된 문자열의 개수
+  modbusData.rStr = Split(modbusData.payloadBuffer, '&', &cnt);
 
   // DebugSerial.print("rStr[0]: ");
   // DebugSerial.println(rStr[0]); // on/off
@@ -1501,17 +1494,17 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.println(rStr[1]); // delayTime
   // DebugSerial.println(isNumeric(rStr[1]));
 
-  if (isNumeric(rStr[1]))
+  if (isNumeric(modbusData.rStr[1]))
   {
-    if (rStr[1].toInt() == 0) // 딜레이 시간값 0: 단순 on/off
+    if (modbusData.rStr[1].toInt() == 0) // 딜레이 시간값 0: 단순 on/off
     {
-      writingRegisters[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
-      writingRegisters[3] = 0;
+      modbusData.writingRegisters[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+      modbusData.writingRegisters[3] = 0;
     }
-    else if (rStr[1].toInt() > 0)
+    else if (modbusData.rStr[1].toInt() > 0)
     {
-      writingRegisters[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
-      writingRegisters[3] = rStr[1].toInt();         // 딜레이할 시간값 대입
+      modbusData.writingRegisters[0] = TYPE_2_WRITE_WITH_DELAY;    // 타입2: Write with Delay
+      modbusData.writingRegisters[3] = modbusData.rStr[1].toInt(); // 딜레이할 시간값 대입
     }
 
     // 릴레이 조작(컨트롤) 로직 ******************************************************************************************
@@ -1519,281 +1512,97 @@ void callback(char *topic, byte *payload, unsigned int length)
     // topic으로 한번 구분하고 (r1~)
     if (strstr(topic, "/r01")) // 릴레이 채널 1 (인덱스 0)
     {
-      suffix = "/r01"; // 추가할 문자열을 설정
-      index_relay = 0; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r01"; // 추가할 문자열을 설정
+      modbusData.index_relay = 0; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
     {
-      suffix = "/r02"; // 추가할 문자열을 설정
-      index_relay = 1; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r02"; // 추가할 문자열을 설정
+      modbusData.index_relay = 1; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
     {
-      suffix = "/r03"; // 추가할 문자열을 설정
-      index_relay = 2; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r03"; // 추가할 문자열을 설정
+      modbusData.index_relay = 2; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
     {
-      suffix = "/r04"; // 추가할 문자열을 설정
-      index_relay = 3; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r04"; // 추가할 문자열을 설정
+      modbusData.index_relay = 3; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
     {
-      suffix = "/r05"; // 추가할 문자열을 설정
-      index_relay = 4; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r05"; // 추가할 문자열을 설정
+      modbusData.index_relay = 4; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
     {
-      suffix = "/r06"; // 추가할 문자열을 설정
-      index_relay = 5; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r06"; // 추가할 문자열을 설정
+      modbusData.index_relay = 5; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
     {
-      suffix = "/r07"; // 추가할 문자열을 설정
-      index_relay = 6; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r07"; // 추가할 문자열을 설정
+      modbusData.index_relay = 6; // r1~r8: 0~7
     }
     else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
     {
-      suffix = "/r08"; // 추가할 문자열을 설정
-      index_relay = 7; // r1~r8: 0~7
-
-      allowsModbusTask_Relay = true;
-      // while (allowsModbusTask_Relay)
-      // {
-      //   delay(1);
-      // }
-      // if (allowsPublishNewTopic)
-      // {
-      //   publishNewTopic();
-      //   allowsPublishNewTopic = false;
-      // }
+      modbusData.suffix = "/r08"; // 추가할 문자열을 설정
+      modbusData.index_relay = 7; // r1~r8: 0~7
     }
 
-    // 8채널이 아닐 때 (16채널 이상)
-    else if (relayId != "relayId_8ch")
+    // 4, 8채널이 아닐 때 (16채널 이상)
+    else if (relayId != "relayId_4ch" && relayId != "relayId_8ch")
     {
-
       if (strstr(topic, "/r09")) // 릴레이 채널 9 (인덱스 8)
       {
-        suffix = "/r09"; // 추가할 문자열을 설정
-        index_relay = 8; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r09"; // 추가할 문자열을 설정
+        modbusData.index_relay = 8; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r10")) // 릴레이 채널 10 (인덱스 9)
       {
-        suffix = "/r10"; // 추가할 문자열을 설정
-        index_relay = 9; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r10"; // 추가할 문자열을 설정
+        modbusData.index_relay = 9; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r11")) // 릴레이 채널 11 (인덱스 10)
       {
-        suffix = "/r11";  // 추가할 문자열을 설정
-        index_relay = 10; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r11";  // 추가할 문자열을 설정
+        modbusData.index_relay = 10; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r12")) // 릴레이 채널 12 (인덱스 11)
       {
-        suffix = "/r12";  // 추가할 문자열을 설정
-        index_relay = 11; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r12";  // 추가할 문자열을 설정
+        modbusData.index_relay = 11; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r13")) // 릴레이 채널 13 (인덱스 12)
       {
-        suffix = "/r13";  // 추가할 문자열을 설정
-        index_relay = 12; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r13";  // 추가할 문자열을 설정
+        modbusData.index_relay = 12; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r14")) // 릴레이 채널 14 (인덱스 13)
       {
-        suffix = "/r14";  // 추가할 문자열을 설정
-        index_relay = 13; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r14";  // 추가할 문자열을 설정
+        modbusData.index_relay = 13; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r15")) // 릴레이 채널 15 (인덱스 14)
       {
-        suffix = "/r15";  // 추가할 문자열을 설정
-        index_relay = 14; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r15";  // 추가할 문자열을 설정
+        modbusData.index_relay = 14; // r1~r16: 0~15
       }
       else if (strstr(topic, "/r16")) // 릴레이 채널 16 (인덱스 15)
       {
-        suffix = "/r16";  // 추가할 문자열을 설정
-        index_relay = 15; // r1~r16: 0~15
-
-        allowsModbusTask_Relay = true;
-        // while (allowsModbusTask_Relay)
-        // {
-        //   delay(1);
-        // }
-        // if (allowsPublishNewTopic)
-        // {
-        //   publishNewTopic();
-        //   allowsPublishNewTopic = false;
-        // }
+        modbusData.suffix = "/r16";  // 추가할 문자열을 설정
+        modbusData.index_relay = 15; // r1~r16: 0~15
       }
-    } // else if (relayId != "relayId_8ch")
-  } // if (isNumeric(rStr[1]))
-  else if (rStr[0] == "refresh")
-  {
-    allowsModbusTask_Relay = true;
-    while (allowsModbusTask_Relay)
-    {
-      delay(1);
-    }
+    } // else if (relayId != "relayId_4ch" && relayId != "relayId_8ch")
 
-    if (allowsPublishStatus)
-    {
-      // topic: "type1sc/farmtalkSwitch00/update
-      client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), String(readingStatusRegister[0]).c_str());
-      allowsPublishStatus = false;
-    }
+    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+  } // if (isNumeric(rStr[1]))
+
+  else if (modbusData.rStr[0] == "refresh")
+  {
+    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+    // task에서 발행하기
   }
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
   {
@@ -1804,7 +1613,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   if (strstr(topic, "/ResAddSch")) // 스케줄 추가 기능 수행
   {
     // 파싱-데이터저장-기능수행
-    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
     {
       DebugSerial.println("Cannot find JSON data...");
@@ -1816,7 +1625,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   else if (strstr(topic, "/ResUpdateSch")) // 스케줄 수정 기능 수행
   {
-    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
     {
       DebugSerial.println("Cannot find JSON data...");
@@ -1828,7 +1637,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   else if (strstr(topic, "/ResDelSch")) // 스케줄 삭제 기능 수행
   {
-    const char *jsonPart = strchr(payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
     {
       DebugSerial.println("Cannot find JSON data...");
@@ -1839,15 +1648,17 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
   }
 
+  // 디버그 로그
+
   // DebugSerial.print("readingStatusRegister: ");
   // DebugSerial.println(readingStatusRegister[0]);
   // DebugSerial.print("writingRegisters[2]: ");
-  // DebugSerial.println(writingRegisters[2]);
+  // DebugSerial.println(modbusData.writingRegisters[2]);
 
   // DebugSerial.print("writingRegisters_Expand[1]: ");
-  // DebugSerial.println(writingRegisters_Expand[1]);
+  // DebugSerial.println(modbusData.writingRegisters_Expand[1]);
   // DebugSerial.print("writingRegisters_Expand[2]: ");
-  // DebugSerial.println(writingRegisters_Expand[2]);
+  // DebugSerial.println(modbusData.writingRegisters_Expand[2]);
 
   // DebugSerial.println(testMsg1);
   // DebugSerial.println(testMsg2);
@@ -2523,21 +2334,6 @@ bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
           currentTime.tm_min == scheduleTime.tm_min &&
           abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
                                                                // currentTime.tm_sec == scheduleTime.tm_sec);
-}
-
-// Delay 값으로 레지스터 사전입력
-void Input_writingRegisters_Schedule(const ScheduleData &data)
-{
-  if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
-  {
-    writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
-    writingRegisters_Schedule[3] = 0;
-  }
-  else if (data.delay > 0)
-  {
-    writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
-    writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
-  }
 }
 
 void setup()
