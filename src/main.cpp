@@ -1346,6 +1346,8 @@ void TimeTask_NTPSync(void *pvParameters)
       {
         isNTPtimeUpdated = true;
       }
+      // 시간 동기화 성공 시 주기적으로 동기화
+      vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
     }
     else
     {
@@ -1353,8 +1355,6 @@ void TimeTask_NTPSync(void *pvParameters)
       enqueue_log(logMsg);
     }
 
-    // 주기적으로 동기화
-    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
 
@@ -2554,7 +2554,7 @@ void setup()
       }
       // ESP가 양식 세부 정보를 수신했음을 알 수 있도록 일부 텍스트가 포함된 응답을 send
       request->send(200, "text/plain", "Done. ESP will restart.");
-      delay(3000);
+      delay(2000);
       ESP.restart(); });
     server.begin();
   }
