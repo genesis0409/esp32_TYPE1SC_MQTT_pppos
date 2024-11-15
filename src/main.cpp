@@ -127,8 +127,8 @@ struct ScheduleData // ScheduleDB 멤버변수 중 릴레이 제어에 쓰일 �
   bool value;
   int delay;
 };
-void Input_writingRegisters_Schedule(const ScheduleData &data); // Delay 값으로 레지스터 사전입력
-QueueHandle_t scheduleQueue;                                    // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
+QueueHandle_t scheduleQueue;   // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
+#define SCHEDULE_QUEUE_SIZE 20 // 큐 크기 설정
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -3382,10 +3382,15 @@ void setup()
       return;
     }
 
-    // scheduleQueue 생성, 최대 10개의 ScheduleData 항목을 보관할 수 있습니다.
-    scheduleQueue = xQueueCreate(10, sizeof(ScheduleData));
+    // Modbus 큐 생성
+    modbusQueue = xQueueCreate(10, sizeof(ModbusData));
+    if (modbusQueue == NULL)
+    {
+      Serial.println("Failed to create Modbus queue.");
+    }
 
-    // 큐 생성에 실패한 경우 처리
+    // scheduleQueue 생성, 최대 10개의 ScheduleData 항목을 보관할 수 있습니다.
+    scheduleQueue = xQueueCreate(SCHEDULE_QUEUE_SIZE, sizeof(ScheduleData));
     if (scheduleQueue == NULL)
     {
       Serial.println("Failed to create schedule queue");
