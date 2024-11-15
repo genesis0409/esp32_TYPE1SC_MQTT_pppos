@@ -16,6 +16,12 @@
 // });
 
 $(function () {
+  // ***** callCSharpFunction 정의 *****
+  function callCSharpFunction() {
+    window.location.href = "csharp://goLogin";
+    console.log(`call callCSharpFunction()`);
+  }
+
   // ***** 비밀번호 실시간 2차 검증 기능 *****
   function checkPasswords() {
     var pw1 = $("#mqttPw1").val();
@@ -95,11 +101,13 @@ $(function () {
     checkPasswords();
   });
 
-  // 폼 제출 시 비밀번호 확인
+  // 폼 제출 시 비밀번호 확인 및 callCSharpFunction 호출
   $("#submitForm").on("submit", function (event) {
     if (!checkPasswords()) {
       event.preventDefault(); // 폼 제출 막기
       $("#mqttPw1").focus(); // 첫 번째 비밀번호 필드에 포커스 맞추기
+    } else {
+      callCSharpFunction(); // 비밀번호가 일치할 때만 C# 함수 호출
     }
   });
 
