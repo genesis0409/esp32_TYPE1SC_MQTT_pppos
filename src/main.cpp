@@ -164,12 +164,6 @@ bool allowsPublishSensor_result_rain = false;
 bool allowsPublishSensor_result_ec = false;
 bool allowsPublishSensor_result_soil = false;
 
-// 릴레이 상태 획득 성공 발행 여부
-bool allowsPublishStatus = false;
-
-// 릴레이 제어 성공 발행 여부
-bool allowsPublishNewTopic = false;
-
 // modbus 센서 value 수집 간격 설정; 추가 센서 1개당 10% 지연
 bool allows2ndSensorTaskDelay = false;
 bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
@@ -218,23 +212,18 @@ String WILL_MESSAGE = "DISCONNECTED."; // /DISCONNECTED.
 #define MULTI_LEVEL_WILDCARD "/#"
 #define SINGLE_LEVEL_WILDCARD "/+"
 
-String DEVICE_TOPIC;  // /farmtalkSwitch00
-int PUB_TOPIC_length; // "type1sc/farmtalkSwitch00/update"의 길이 정보
+String DEVICE_TOPIC; // /farmtalkSwitch00
 
-String payloadBuffer = ""; // 메시지 스플릿을 위한 페이로드 버퍼 변수
-String suffix = "";        // 추가할 문자열을 설정
-
-#define BIT_SELECT 1
-#define BIT_ON 1
-#define BIT_OFF 0
-#define SHIFT_CONSTANT 8
-
-void publishNewTopic();           // 릴레이 제어 후 제어완료 토픽/메시지 발행
 void publishSensorData();         // 센서값 발행
 void publishModbusSensorResult(); // 센서 modbus 오류 시 결과 발행
 
+QueueHandle_t publishQueue;   // 메시지 publish를 위한 Queue 생성; 릴레이 제어완료, 센서값 발행
+#define PUBLISH_QUEUE_SIZE 20 // 큐 크기 설정
+#define PUBLISH_MSG_SIZE 128  // 발행 메시지 크기 설정
+
+void enqueue_MqttMsg(const char *message); // MQTT 메시지를 큐에 추가하는 함수
+
 String *Split(String sData, char cSeparator, int *scnt); // 문자열 파싱
-String *rStr = nullptr;                                  // 파싱된 문자열 저장변수
 bool isNumeric(String str);                              // 문자열이 숫자로만 구성되어있는지 판단
 void printBinary8(uint16_t num);                         // 8 자리 이진수 바이너리 출력
 void printBinary16(uint16_t num);                        // 16자리 이진수 바이너리 출력
@@ -327,6 +316,8 @@ void ModbusTask_Sensor_soil(void *pvParameters);         // 수분장력 센서 
 void TimeTask_NTPSync(void *pvParameters);         // NTP 서버와 시간을 동기화하는 task
 void TimeTask_ESP_Update_Time(void *pvParameters); // ESP32 내부 타이머로 시간 업데이트하는 태스크
 void log_print_task(void *pvParameters);           // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
+
+void msg_publish_task(void *pvParameters); // 큐에서 메시지를 꺼내서 MQTT로 발행하는 태스크
 
 // 각 센서별 Slave ID 고정 지정
 const int slaveId_relay = 1;
@@ -424,11 +415,17 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
+          // 큐에 전달할 데이터 구성: {topic}$256&refresh
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
-          allowsPublishStatus = true;
-        }
 
-        allowsModbusTask_Relay = false;
+          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/status"; // topic(상태)
+          pubMsg += "$";                                                       // 구분자
+          pubMsg += readingStatusRegister[0];                                  // 릴레이 상태값
+          pubMsg += "&";                                                       // 페이로드 구분자
+          pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
+
+          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+        }
       }
 
       // (r1~r8) 일반적인 릴레이 제어 작업
@@ -486,9 +483,23 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
-          // allowsPublishNewTopic = true;
+
+          // 큐에 전달할 데이터 구성: {topic}$1&on
+          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC; // topic(수동)
+          pubMsg += "$";                                           // 구분자
+
+          // suffix "/r00" 에서 substring으로 십의 자리, 일의 자리 추출
+          if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
+          {
+            pubMsg += receivedData.suffix.substring(2, 3); // 십의 자리 append
+          }
+          pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
+          pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
+          pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
+
+          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
-        else
+        else // [미구현] 실패 시 에러코드 보내나?
         {
           testBit = modbus_Relay_result;
         }
@@ -593,9 +604,26 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
       {
         // DebugSerial.println("MODBUS Writing done.");
         // testMsg5 = "ok";
-        // allowsPublishNewTopic = true;
+
+        // 스케줄 작업에 대한 topic/payload 구성해 publish 큐 사용하기
+        // 큐에 전달할 데이터 구성: {topic}$1&on&10
+        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "sh"; // 스케줄 topic(updatesh)
+        pubMsg += "$";                                                  // 구분자
+        // String tempZero = "r";
+        // if (data.num < 10) // 1~9 일때 공백 0 채우기
+        // {
+        //   tempZero += "0";
+        // }
+        // pubMsg += tempZero + data.num; // 릴레이 토픽 "r00" 구성
+        pubMsg += data.num;
+        pubMsg += "&";                       // 릴레이 번호와 페이로드 구분자
+        pubMsg += data.value ? "on" : "off"; // 0, 1정수형으로 해석; on&10 형식으로 구성
+        pubMsg += "&";
+        pubMsg += data.delay;
+
+        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
       }
-      else
+      else // [미구현] 실패 시 에러코드 보내나?
       {
         // testBit = modbus_Relay_result;
       }
@@ -655,11 +683,17 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
+          // 큐에 전달할 데이터 구성: {topic}$256&refresh
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
-          allowsPublishStatus = true;
-        }
 
-        allowsModbusTask_Relay = false;
+          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/status"; // topic(수동)
+          pubMsg += "$";                                                       // 구분자
+          pubMsg += readingStatusRegister[0];                                  // 릴레이 상태값
+          pubMsg += "&";                                                       // 페이로드 구분자
+          pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
+
+          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+        }
       }
 
       // (r1~r16) 일반적인 릴레이 제어 작업 (확장 주소 사용)
@@ -746,9 +780,23 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
-          // allowsPublishNewTopic = true;
+
+          // 큐에 전달할 데이터 구성: {topic}$1&on
+          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC; // topic(수동)
+          pubMsg += "$";                                           // 구분자
+
+          // suffix "/r00" 에서 substring으로 십의 자리, 일의 자리 추출
+          if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
+          {
+            pubMsg += receivedData.suffix.substring(2, 3); // 십의 자리 append
+          }
+          pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
+          pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
+          pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
+
+          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
-        else
+        else // [미구현] 실패 시 에러코드 보내나?
         {
           testBit = modbus_Relay_result;
         }
@@ -882,9 +930,26 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
       {
         // DebugSerial.println("MODBUS Writing done.");
         // testMsg5 = "ok";
-        // allowsPublishNewTopic = true;
+
+        // 스케줄 작업에 대한 topic/payload 구성해 publish 큐 사용하기
+        // 큐에 전달할 데이터 구성: {topic}$1&on&10
+        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/sh"; // 스케줄 topic(updatesh)
+        pubMsg += "$";                                                   // 구분자
+        // String tempZero = "r";
+        // if (data.num < 10) // 1~9 일때 공백 0 채우기
+        // {
+        //   tempZero += "0";
+        // }
+        // pubMsg += tempZero + data.num; // 릴레이 토픽 "r00" 구성
+        pubMsg += data.num;
+        pubMsg += "&";                       // 릴레이 번호와 페이로드 구분자
+        pubMsg += data.value ? "on" : "off"; // 0, 1정수형으로 해석; on&10 형식으로 구성
+        pubMsg += "&";
+        pubMsg += data.delay;
+
+        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
       }
-      else
+      else // [미구현] 실패 시 에러코드 보내나?
       {
         // testBit = modbus_Relay_result;
       }
@@ -1430,6 +1495,15 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
   }
 }
 
+// 로그 메시지를 큐에 추가하는 함수
+void enqueue_log(const char *message)
+{
+  if (xQueueSend(logQueue, message, portMAX_DELAY) != pdPASS)
+  {
+    DebugSerial.println("Failed to Enqueue Log Message");
+  }
+}
+
 // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
 void log_print_task(void *pvParameters)
 {
@@ -1443,6 +1517,42 @@ void log_print_task(void *pvParameters)
       // 로그 메시지 시리얼 포트로 출력
       DebugSerial.println(logMsg);
     }
+    vTaskDelay(300);
+  }
+}
+
+// MQTT 메시지를 큐에 추가하는 함수
+void enqueue_MqttMsg(const char *message)
+{
+  if (xQueueSend(publishQueue, message, portMAX_DELAY) != pdPASS)
+  {
+    DebugSerial.println("Failed to Enqueue MQTT Message");
+  }
+}
+
+// 큐에서 메시지를 꺼내서 MQTT로 발행하는 태스크
+void msg_publish_task(void *pvParameters)
+{
+  char pubMsg[PUBLISH_MSG_SIZE];
+
+  while (true)
+  {
+    // 큐에서 로그 메시지 받기
+    if (xQueueReceive(publishQueue, &pubMsg, portMAX_DELAY) == pdPASS)
+    {
+      // Split 하기: {topic}${data}&{payloadBuffer}
+      int cnt = 0; // Split()으로 분할된 문자열의 개수
+      String *mqttStr = Split(String(pubMsg), '$', &cnt);
+      // mqttStr[0]: topic
+      // mqttStr[1]: data or relayNum + payloadBuffer
+
+      // publish; 발행
+      client.publish((mqttStr[0]).c_str(), (mqttStr[1]).c_str()); // {topic}, {payload}
+
+      // [미구현] publishSensorData() 개편 보류
+      // [미구현] publishModbusSensorResult() 개편 보류
+    }
+    vTaskDelay(300);
   }
 }
 
@@ -1728,36 +1838,6 @@ void reconnect()
       delay(5000);
     }
   }
-}
-
-// 릴레이 제어 후 제어완료 토픽/메시지 발행
-void publishNewTopic()
-{
-  // 발행 주제 설정
-  int suffix_length = strlen(suffix.c_str()); // 추가할 문자열(suffix)의 길이 계산
-
-  // 새로운 문자열을 저장할 메모리 할당
-  char *new_PUB_TOPIC = (char *)malloc(PUB_TOPIC_length + suffix_length + 1); // +1은 널 종료 문자('\0') 고려
-  strcpy(new_PUB_TOPIC, (PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str());   // PUB_TOPIC의 내용을 새로운 문자열에 복사
-  strcat(new_PUB_TOPIC, suffix.c_str());                                      // suffix를 새로운 문자열에 추가
-
-  // topic: "type1sc/farmtalkSwitch00/update" + "r-"
-  client.publish(new_PUB_TOPIC, payloadBuffer.c_str()); // 릴레이 동작 후 완료 메시지 publish
-  // DebugSerial.print("Publish Topic: ");
-  // DebugSerial.println(new_PUB_TOPIC);
-  // DebugSerial.print("Message: ");
-  // DebugSerial.println(payloadBuffer.c_str());
-
-  // DebugSerial.println(suffix);
-  // DebugSerial.println(suffix_length);
-  // DebugSerial.println(PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC);
-  // DebugSerial.println(PUB_TOPIC_length);
-
-  // DebugSerial.println(new_PUB_TOPIC);
-  // DebugSerial.println(payloadBuffer.c_str());
-
-  // payloadBuffer = "";
-  free(new_PUB_TOPIC);
 }
 
 void publishSensorData()
@@ -2114,15 +2194,6 @@ void getTime()
   }
   // DebugSerial.print("Time : ");
   // DebugSerial.println(szTime);
-}
-
-// 로그 메시지를 큐에 추가하는 함수
-void enqueue_log(const char *message)
-{
-  if (xQueueSend(logQueue, message, portMAX_DELAY) != pdPASS)
-  {
-    DebugSerial.println("Failed to Enqueue Log Message");
-  }
 }
 
 // [HTTP] JSON 배열 파싱 및 ScheduleDB 추가 함수: JSON 파싱해 ScheduleDB 객체로 변환하고 manager를 통해 리스트에 추가
@@ -3320,6 +3391,13 @@ void setup()
       Serial.println("Failed to create schedule queue");
     }
 
+    // publishQueue 생성, 최대 15개의 publish 메시지를 보관할 수 있습니다.
+    publishQueue = xQueueCreate(PUBLISH_QUEUE_SIZE, sizeof(char) * PUBLISH_MSG_SIZE);
+    if (publishQueue == NULL)
+    {
+      Serial.println("Failed to create publish queue");
+    }
+
     // NTP 동기화 태스크 생성
     xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
@@ -3328,6 +3406,9 @@ void setup()
 
     // 로그 출력 태스크 생성
     xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 4, NULL);
+
+    // 메시지 발행 태스크 생성
+    xTaskCreate(msg_publish_task, "msg_publish_task", 2048, NULL, 4, NULL);
 
     if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
     {
