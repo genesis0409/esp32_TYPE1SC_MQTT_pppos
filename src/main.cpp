@@ -1044,14 +1044,9 @@ void ModbusTask_Sensor_th(void *pvParameters)
       temp = float(modbus.getResponseBuffer(0) / 10.00F);
       humi = float(modbus.getResponseBuffer(1) / 10.00F);
 
-      // Get response data from sensor
-      // allowsModbusTask_Sensor_th = false;
-
       allowsPublishTEMP = true;
       allowsPublishHUMI = true;
       publishSensorData();
-
-      modbus_Sensor_result_th = -1;
     }
     // 오류 처리
     else
@@ -1059,7 +1054,8 @@ void ModbusTask_Sensor_th(void *pvParameters)
       allowsPublishSensor_result_th = true;
       publishModbusSensorResult();
     }
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    modbus_Sensor_result_th = 77; // 초기화
+
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
@@ -1128,14 +1124,9 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
       humi = float(modbus.getResponseBuffer(1) / 10.00F);
       errBit = modbus.getResponseBuffer(2);
 
-      // Get response data from sensor
-      // allowsModbusTask_Sensor_tm100 = false;
-
       allowsPublishTEMP = true;
       allowsPublishHUMI = true;
       publishSensorData();
-
-      modbus_Sensor_result_tm100 = -1; // 초기화
     }
     // 오류 처리
     else
@@ -1143,7 +1134,8 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
       allowsPublishSensor_result_tm100 = true;
       publishModbusSensorResult();
     }
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    modbus_Sensor_result_tm100 = 77; // 초기화
+
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
@@ -1229,13 +1221,8 @@ void ModbusTask_Sensor_rain(void *pvParameters)
         isRainy = false; // 비 미감지
       }
 
-      // Get response data from sensor
-      // allowsModbusTask_Sensor_rain = false;
-
       allowsPublishRAIN = true;
       publishSensorData();
-
-      modbus_Sensor_result_rain = -1; // 초기화
     }
     // 오류 처리
     else
@@ -1243,8 +1230,8 @@ void ModbusTask_Sensor_rain(void *pvParameters)
       allowsPublishSensor_result_rain = true;
       publishModbusSensorResult();
     }
+    modbus_Sensor_result_rain = 77; // 초기화
 
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
@@ -1313,15 +1300,10 @@ void ModbusTask_Sensor_ec(void *pvParameters)
       soilHumi = float(modbus.getResponseBuffer(1) / 10.00F);
       ec = float(modbus.getResponseBuffer(2) / 1000.00F);
 
-      // Get response data from sensor
-      // allowsModbusTask_Sensor_ec = false;
-
       allowsPublishSoilT = true;
       allowsPublishSoilH = true;
       allowsPublishEC = true;
       publishSensorData();
-
-      modbus_Sensor_result_ec = -1; // 초기화
     }
     // 오류 처리
     else
@@ -1329,7 +1311,8 @@ void ModbusTask_Sensor_ec(void *pvParameters)
       allowsPublishSensor_result_ec = true;
       publishModbusSensorResult();
     }
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    modbus_Sensor_result_ec = 77; // 초기화
+
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
 }
@@ -1969,35 +1952,30 @@ void publishModbusSensorResult()
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
     // DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
     allowsPublishSensor_result_th = false;
-    modbus_Sensor_result_th = -1;
   }
   if (allowsPublishSensor_result_tm100)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
     // DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
     allowsPublishSensor_result_tm100 = false;
-    modbus_Sensor_result_tm100 = -1;
   }
   if (allowsPublishSensor_result_rain)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
     // DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
     allowsPublishSensor_result_rain = false;
-    modbus_Sensor_result_rain = -1;
   }
   if (allowsPublishSensor_result_ec)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
     // DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
     allowsPublishSensor_result_ec = false;
-    modbus_Sensor_result_ec = -1;
   }
   if (allowsPublishSensor_result_soil)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
     // DebugSerial.println("ModbusSensorError_soil result: " + String(modbus_Sensor_result_soil));
     allowsPublishSensor_result_soil = false;
-    modbus_Sensor_result_soil = -1;
   }
 }
 
@@ -2184,9 +2162,6 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 //       DebugSerial.println(modbus_Sensor_result);
 //       break;
 //     }
-
-//     // 오류 처리 후 상태 초기화
-//     modbus_Sensor_result = -1;
 //   }
 // }
 
