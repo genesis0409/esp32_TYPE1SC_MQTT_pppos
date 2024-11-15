@@ -192,22 +192,22 @@ bool atMode = true;
 
 #define MQTT_SERVER "broker.hivemq.com" // BROKER_ID로 대체
 
-// 241019 TOPIC 구조 개편
-String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/refresh
-String PUB_TOPIC = "type1sc";          // 발행 주제: type1sc/farmtalkSwitch00/update;
-String PUB_TOPIC_SENSOR = "type1sc";   // 센서 발행 주제 type1sc/farmtalkSwitch00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
-String PUB_TOPIC_SCHEDULE = "type1sc"; // 스케줄 발행 주제 type1sc/farmtalkSwitch00/{스케줄기능토픽}; 페이로드: 스케줄 JSON
+// 241114 TOPIC 구조 개편
+const String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/refresh
+const String PUB_TOPIC = "type1sc";          // 발행 주제: type1sc/farmtalkSwitch00/update;
+const String PUB_TOPIC_SENSOR = "type1sc";   // 센서 발행 주제 type1sc/farmtalkSwitch00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
+const String PUB_TOPIC_SCHEDULE = "type1sc"; // 스케줄 발행 주제 type1sc/farmtalkSwitch00/{스케줄기능토픽}; 페이로드: 스케줄 JSON
 
-String CONTROL_TOPIC = "/control"; // /control
-String UPDATE_TOPIC = "/update";   // /update
-String SENSOR_TOPIC = "/sensor";   // /sensor
+const String CONTROL_TOPIC = "/control"; // /control
+const String UPDATE_TOPIC = "/update";   // /update
+const String SENSOR_TOPIC = "/sensor";   // /sensor
 
-String AddSch_TOPIC = "/ResAddSch";       // /ResAddSch
-String UpdateSch_TOPIC = "/ResUpdateSch"; // /ResUpdateSch
-String DelSch_TOPIC = "/ResDelSch";       // /ResDelSch
+const String AddSch_TOPIC = "/ResAddSch";       // /ResAddSch
+const String UpdateSch_TOPIC = "/ResUpdateSch"; // /ResUpdateSch
+const String DelSch_TOPIC = "/ResDelSch";       // /ResDelSch
 
-String WILL_TOPIC = "/disconnect";     // /disconnect
-String WILL_MESSAGE = "DISCONNECTED."; // /DISCONNECTED.
+const String WILL_TOPIC = "/disconnect";     // /disconnect
+const String WILL_MESSAGE = "DISCONNECTED."; // /DISCONNECTED.
 
 #define MULTI_LEVEL_WILDCARD "/#"
 #define SINGLE_LEVEL_WILDCARD "/+"
