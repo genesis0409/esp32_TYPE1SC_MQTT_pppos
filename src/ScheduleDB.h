@@ -116,7 +116,15 @@ public:
             Serial.println(idx);
             return true;
         }
-        Serial.println("Schedule not found for update");
+        else // 없다면 추가
+        {
+            scheduleList[idx] = newSchedule;
+            scheduleList[newSchedule.getIdx()] = newSchedule; // 추가될 스케줄 idx가 1이면 scheduleList[1]에 추가
+            Serial.println("Schedule not found for update...");
+            Serial.print("Schedule added with Idx: ");
+            Serial.println(newSchedule.getIdx());
+        }
+
         return false;
     }
 
