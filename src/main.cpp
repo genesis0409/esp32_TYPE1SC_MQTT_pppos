@@ -94,7 +94,7 @@ String code_sen2;
 // HTTP 통신 관련 변수
 char IPAddr[32];
 char sckInfo[128];
-char recvBuffer[2048];
+char recvBuffer[5000];
 int recvSize;
 bool httpRecvOK = false;               // http 메시지 수신 여부
 uint8_t httpTryCount = 0;              // http 통신 시도 횟수
@@ -104,6 +104,13 @@ int farmtalkServerLoginResult = -1;    // 서버 발 사용자 로그인 결과;
 int farmtalkServerScheduleResult = -1; // 서버 발 스케줄 정보 수신 결과
 
 void getTime(); // TYPE1SC 모듈에서 AT커맨드를 사용한 시간 정보 업데이트 함수
+
+// 1000바이트 제한을 넘는 데이터 수신을 위해 데이터를 반복적으로 읽음
+int socketRecvMultiple(char *buffer, int totalBufferSize, int *recvSize); // buffer: 데이터를 누적 저장할 메인 버퍼
+                                                                          // totalBufferSize : 메인 버퍼의 최대 크기(예 : 5000바이트)
+                                                                          // recvSize : 수신한 총 데이터 크기를 반환할 포인터
+                                                                          // 반환값이 0이면 정상적으로 데이터를 수신 완료
+                                                                          // 반환값이 0이 아니면 오류가 발생하거나 데이터 수신이 중단됨
 
 // NTP 시간 관련 변수
 #define FORMAT_TIME "%Y-%m-%d %H:%M:%S" // 1995-04-09 20:01:01
@@ -2165,7 +2172,7 @@ void getTime()
 void parseHttpAndAddSchedule(const char *jsonPart)
 {
   // JSON 파싱을 위한 JsonDocument 생성
-  StaticJsonDocument<2048> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
+  StaticJsonDocument<4096> doc; // JsonDocument 크기는 JSON 크기에 맞게 조정
   DeserializationError error = deserializeJson(doc, jsonPart);
 
   // 파싱 오류 확인
@@ -2370,6 +2377,47 @@ bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
           currentTime.tm_min == scheduleTime.tm_min &&
           abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
                                                                // currentTime.tm_sec == scheduleTime.tm_sec);
+}
+
+// 1000바이트 제한을 넘는 데이터 수신을 위해 데이터를 반복적으로 읽음
+int socketRecvMultiple(char *buffer, int totalBufferSize, int *recvSize) // buffer: 데이터를 누적 저장할 메인 버퍼
+                                                                         // totalBufferSize : 메인 버퍼의 최대 크기(예 : 5000바이트)
+                                                                         // recvSize : 수신한 총 데이터 크기를 반환할 포인터
+                                                                         // 반환값이 0이면 정상적으로 데이터를 수신 완료
+                                                                         // 반환값이 0이 아니면 오류가 발생하거나 데이터 수신이 중단됨
+{
+  char tempBuffer[1024]; // 임시 버퍼: 한 번에 최대 1024바이트까지 수신 가능
+  int tempRecvSize;      // 임시로 수신한 데이터 크기 저장
+  int totalRecvSize = 0; // 총 수신된 데이터 크기
+  int result;            // 수신 결과 상태 (0: 성공, 오류 발생 시 다른 값)
+
+  // 수신 루프 시작: 메인 버퍼(buffer)에 데이터를 누적하면서, 최대 크기(totalBufferSize, 예: 5000바이트)를 초과하지 않을 때까지 데이터를 계속 읽음.
+  while (totalRecvSize < totalBufferSize) // 버퍼사이즈 약 5000까지 들어올 예정
+  {
+    result = TYPE1SC.socketRecv(tempBuffer, sizeof(tempBuffer), &tempRecvSize); // 0이면 정상수신; tempBuffer에 수신
+    if (result != 0 || tempRecvSize == 0)
+    {
+      // 오류가 발생하거나 더 이상 데이터를 받을 수 없으면 루프 종료
+      break;
+    }
+
+    // 버퍼 오버플로 방지
+    if (totalRecvSize + tempRecvSize > totalBufferSize) // 이미 받은 + 방금 받은 데이터가 totalBufferSize를 초과하면 초과하지 않는 만큼만 복사
+    {
+      tempRecvSize = totalBufferSize - totalRecvSize; // 초과분(4001 + 1000 > 5000)을 잘라서 999바이트만 복사
+    }
+    memcpy(buffer + totalRecvSize, tempBuffer, tempRecvSize); // 수신 데이터(tempBuffer)를 메인 버퍼(buffer)로 복사; buffer는 반복해서 크기와 인덱스를 늘려감
+    totalRecvSize += tempRecvSize;                            // 복사 후, 총 수신 크기(totalRecvSize)를 갱신
+
+    // 모든 데이터를 수신했다면 종료: 서버가 전송을 완료했거나 데이터가 부족한 경우
+    if (tempRecvSize < sizeof(tempBuffer)) // 수신 데이터 크기가 버퍼 크기보다 작으면
+    {
+      break;
+    }
+  }
+
+  *recvSize = totalRecvSize;
+  return totalRecvSize > 0 ? 0 : -1; // 0: 성공, -1: 실패
 }
 
 void setup()
@@ -3187,7 +3235,7 @@ void setup()
         }
 
         /* 4-1 :TCP Socket Recv Data */
-        if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+        if (socketRecvMultiple(recvBuffer, sizeof(recvBuffer), &recvSize) == 0) // 스케줄 데이터가 꽤나 크다.
         {
           DebugSerial.print("[RecvSize] >> ");
           DebugSerial.println(recvSize);
@@ -3223,7 +3271,7 @@ void setup()
             }
             else
             {
-              // http메시지 저장 로직 넣기
+              // http메시지 저장 로직
               parseHttpAndAddSchedule(jsonPart);
 
               httpRecvOK = true;
