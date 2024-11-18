@@ -110,6 +110,7 @@ void getTime(); // TYPE1SC 모듈에서 AT커맨드를 사용한 시간 정보 �
 #define FORMAT_TIME_LEN 19              // 1995-04-09 20:01:01 문자열의 길이
 static const char *TIME_TAG = "[SNTP]";
 static const char *TIME_TAG_ESP = "[ESP]";
+static const char *SCHEDULE_TAG = "[SCHEDULE]";
 
 time_t current_time;          // NTP 동기화 후 저장되는 기준 시간
 TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
@@ -126,6 +127,7 @@ struct ScheduleData // ScheduleDB 멤버변수 중 릴레이 제어에 쓰일 �
   int num;
   bool value;
   int delay;
+  struct tm timeInfo; // 스케줄 동작 시각 로그
 };
 QueueHandle_t scheduleQueue;   // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
 #define SCHEDULE_QUEUE_SIZE 20 // 큐 크기 설정
@@ -512,6 +514,8 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
 
   uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   ScheduleData data;
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
+  char logMsg[LOG_MSG_SIZE];
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
@@ -603,6 +607,11 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
         pubMsg += data.delay;
 
         enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+
+        // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
+        strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+        snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d}:", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay);
+        enqueue_log(logMsg);
       }
       else // [미구현] 실패 시 에러코드 보내나?
       {
@@ -820,6 +829,8 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
   uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0};     // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   uint16_t writingRegisters_Expand_Schedule[3] = {(const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
   ScheduleData data;
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
+  char logMsg[LOG_MSG_SIZE];
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
@@ -938,6 +949,11 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
         pubMsg += data.delay;
 
         enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+
+        // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
+        strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+        snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d}:", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay);
+        enqueue_log(logMsg);
       }
       else // [미구현] 실패 시 에러코드 보내나?
       {
@@ -1402,6 +1418,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
+              data.timeInfo = timeInfo;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
@@ -1420,6 +1437,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
+              data.timeInfo = timeInfo;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
@@ -1439,6 +1457,7 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
+              data.timeInfo = timeInfo;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
