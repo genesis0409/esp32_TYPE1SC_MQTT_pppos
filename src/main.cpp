@@ -619,7 +619,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
       }
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 }
 
@@ -961,7 +961,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
       }
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 }
 
