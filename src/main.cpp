@@ -398,6 +398,9 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           pubMsg += "&";                                                       // 페이로드 구분자
           pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
 
+          pubMsg += "$";
+          pubMsg += modbus_Relay_result;
+
           enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
       }
@@ -470,6 +473,9 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
           pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
           pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
+
+          pubMsg += "$";
+          pubMsg += modbus_Relay_result;
 
           enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
@@ -606,17 +612,25 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
         pubMsg += "&";
         pubMsg += data.delay;
 
-        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+        pubMsg += "$";
+        pubMsg += modbus_Relay_result;
 
-        // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
         strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
-        snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d}:", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay);
-        enqueue_log(logMsg);
+
+        pubMsg += "$";
+        pubMsg += "[" + String(timeBuffer) + "]";
+
+        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
       }
       else // [미구현] 실패 시 에러코드 보내나?
       {
         // testBit = modbus_Relay_result;
       }
+      // // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
+      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+      // snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d} [RESULT]: %d", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay, modbus_Relay_result);
+      // enqueue_log(logMsg);
+
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
     vTaskDelay(200 / portTICK_PERIOD_MS);
@@ -681,6 +695,9 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           pubMsg += readingStatusRegister[0];                                  // 릴레이 상태값
           pubMsg += "&";                                                       // 페이로드 구분자
           pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
+
+          pubMsg += "$";
+          pubMsg += modbus_Relay_result;
 
           enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
@@ -783,6 +800,9 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
           pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
           pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
+
+          pubMsg += "$";
+          pubMsg += modbus_Relay_result;
 
           enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
         }
@@ -934,8 +954,8 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 
         // 스케줄 작업에 대한 topic/payload 구성해 publish 큐 사용하기
         // 큐에 전달할 데이터 구성: {topic}$1&on&10
-        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/sh"; // 스케줄 topic(updatesh)
-        pubMsg += "$";                                                   // 구분자
+        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "sh"; // 스케줄 topic(updatesh)
+        pubMsg += "$";                                                  // 구분자
         // String tempZero = "r";
         // if (data.num < 10) // 1~9 일때 공백 0 채우기
         // {
@@ -948,17 +968,25 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
         pubMsg += "&";
         pubMsg += data.delay;
 
-        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
+        pubMsg += "$";
+        pubMsg += modbus_Relay_result;
 
-        // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
         strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
-        snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d}:", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay);
-        enqueue_log(logMsg);
+
+        pubMsg += "$";
+        pubMsg += "[" + String(timeBuffer) + "]";
+
+        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
       }
       else // [미구현] 실패 시 에러코드 보내나?
       {
         // testBit = modbus_Relay_result;
       }
+      // // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
+      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+      // snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d} [RESULT]: %d", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay, modbus_Relay_result);
+      // enqueue_log(logMsg);
+
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
     vTaskDelay(200 / portTICK_PERIOD_MS);
@@ -1509,7 +1537,7 @@ void log_print_task(void *pvParameters)
       // 로그 메시지 시리얼 포트로 출력
       DebugSerial.println(logMsg);
     }
-    vTaskDelay(300);
+    // vTaskDelay(300);
   }
 }
 
@@ -1532,14 +1560,27 @@ void msg_publish_task(void *pvParameters)
     // 큐에서 로그 메시지 받기
     if (xQueueReceive(publishQueue, &pubMsg, portMAX_DELAY) == pdPASS)
     {
-      // Split 하기: {topic}${data}&{payloadBuffer}
+      // Split 하기: {topic}${payload}(data)
       int cnt = 0; // Split()으로 분할된 문자열의 개수
       String *mqttStr = Split(String(pubMsg), '$', &cnt);
       // mqttStr[0]: topic
-      // mqttStr[1]: data or relayNum + payloadBuffer
+      // mqttStr[1]: payload(data: 릴레이 제어 정보)
 
       // publish; 발행
       client.publish((mqttStr[0]).c_str(), (mqttStr[1]).c_str()); // {topic}, {payload}
+
+      DebugSerial.print("Debug Topic: ");
+      DebugSerial.println((mqttStr[0]).c_str());
+      DebugSerial.print("Debug Payload: ");
+      // mqttStr[3]이 존재하고 값이 비어 있지 않다면
+      if (mqttStr[3].length() > 0)
+      {
+        DebugSerial.print((mqttStr[3]).c_str()); // 스케줄 시간 값
+        DebugSerial.print(" ");
+      }
+      DebugSerial.println((mqttStr[1]).c_str());
+      DebugSerial.print("Debug Result: ");
+      DebugSerial.println((mqttStr[2]).c_str()); // modbus Result
 
       // [미구현] publishSensorData() 개편 보류
       // [미구현] publishModbusSensorResult() 개편 보류
@@ -3422,7 +3463,7 @@ void setup()
     // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 태스크 생성
     xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 2048, NULL, 6, NULL);
 
-    // 로그 출력 태스크 생성
+    // 로그 출력 태스크 생성 - [구현 요] 문제 발생: overflow 발생 하는 듯
     xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 4, NULL);
 
     // 메시지 발행 태스크 생성
