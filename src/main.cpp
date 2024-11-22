@@ -387,7 +387,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         // relay status
         modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
         {
           // 큐에 전달할 데이터 구성: {topic}$256&refresh
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
@@ -453,7 +453,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
         // DebugSerial.print("modbus_Relay_result: ");
         // DebugSerial.println(modbus_Relay_result);
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
@@ -585,7 +585,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
       // DebugSerial.print("modbus_Relay_result: ");
       // DebugSerial.println(modbus_Relay_result);
 
-      if (modbus_Relay_result == modbus.ku8MBSuccess)
+      if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
       {
         // DebugSerial.println("MODBUS Writing done.");
         // testMsg5 = "ok";
@@ -671,7 +671,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         // relay status
         modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
         {
           // 큐에 전달할 데이터 구성: {topic}$256&refresh
           readingStatusRegister[0] = modbus.getResponseBuffer(0);
@@ -766,7 +766,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           // DebugSerial.println(modbus_Relay_result);
         }
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess)
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
         {
           // DebugSerial.println("MODBUS Writing done.");
           // testMsg5 = "ok";
@@ -927,7 +927,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
         // DebugSerial.println(modbus_Relay_result);
       }
 
-      if (modbus_Relay_result == modbus.ku8MBSuccess)
+      if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
       {
         // DebugSerial.println("MODBUS Writing done.");
         // testMsg5 = "ok";
