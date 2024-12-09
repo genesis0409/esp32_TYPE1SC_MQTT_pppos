@@ -296,6 +296,8 @@ uint8_t modbus_Sensor_result_soil;
 
 // void checkModbusErrorStatus();
 
+void createRelayJson(JsonDocument &doc, uint8_t relayChannels, uint16_t relayState); // 릴레이 채널 수와 상태값을 입력받아 JSON 배열로 변환하는 함수
+
 struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
 {
   uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0};     // 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
@@ -2439,6 +2441,20 @@ bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
   // currentTime.tm_min == scheduleTime.tm_min &&
   // abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
   // currentTime.tm_sec == scheduleTime.tm_sec);
+}
+
+// 릴레이 채널 수와 상태값을 입력받아 JSON 배열로 변환하는 함수
+void createRelayJson(JsonDocument &doc, uint8_t relayChannels, uint16_t relayState)
+{
+  // Relay 배열 생성
+  JsonArray relay = doc.createNestedArray("relay");
+
+  for (int i = 0; i < relayChannels; i++)
+  {
+    JsonObject relayObj = relay.createNestedObject();
+    relayObj["num"] = i + 1;                        // 릴레이 번호 (1~16)
+    relayObj["val"] = (relayState & (1 << i)) != 0; // 해당 비트가 1이면 true (on), 0이면 false (off)
+  }
 }
 
 void setup()
