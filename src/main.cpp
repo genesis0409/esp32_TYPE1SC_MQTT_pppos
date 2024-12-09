@@ -2393,7 +2393,7 @@ bool stringToStructTm(const String &scheduleTimeStr, struct tm &timeStruct)
   return true;
 }
 
-// 날짜 및 시간 비교 함수 (년, 월, 일, 시, 분, 초 비교)
+// 날짜 및 시간 비교 함수 (년, 월, 일, 시, 분 비교)
 bool compareDate(const struct tm &currentTime, const String &scheduleTimeStr)
 {
   struct tm scheduleTime;
@@ -2407,12 +2407,15 @@ bool compareDate(const struct tm &currentTime, const String &scheduleTimeStr)
           currentTime.tm_mon == scheduleTime.tm_mon &&
           currentTime.tm_mday == scheduleTime.tm_mday &&
           currentTime.tm_hour == scheduleTime.tm_hour &&
-          currentTime.tm_min == scheduleTime.tm_min &&
-          abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
-                                                               // currentTime.tm_sec == scheduleTime.tm_sec);
+          currentTime.tm_min == scheduleTime.tm_min);
+
+  // 초 비교 안함
+  // currentTime.tm_min == scheduleTime.tm_min &&
+  // abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
+  // currentTime.tm_sec == scheduleTime.tm_sec);
 }
 
-// 시간 비교 함수 (시, 분, 초 비교)
+// 시간 비교 함수 (시, 분 비교)
 bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
 {
   struct tm scheduleTime;
@@ -2423,9 +2426,12 @@ bool compareTime(const struct tm &currentTime, const String &scheduleTimeStr)
   }
 
   return (currentTime.tm_hour == scheduleTime.tm_hour &&
-          currentTime.tm_min == scheduleTime.tm_min &&
-          abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
-                                                               // currentTime.tm_sec == scheduleTime.tm_sec);
+          currentTime.tm_min == scheduleTime.tm_min);
+
+  // 초 비교 안함
+  // currentTime.tm_min == scheduleTime.tm_min &&
+  // abs(currentTime.tm_sec - scheduleTime.tm_sec) <= 1); // 초 차이가 1초 이하일 때
+  // currentTime.tm_sec == scheduleTime.tm_sec);
 }
 
 void setup()
