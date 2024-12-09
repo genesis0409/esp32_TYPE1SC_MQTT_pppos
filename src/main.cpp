@@ -117,7 +117,7 @@ TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
 bool isNTPtimeUpdated = false;
 
 static QueueHandle_t logQueue; // 로그 메시지를 저장할 큐
-#define LOG_QUEUE_SIZE 10      // 큐 크기 설정
+#define LOG_QUEUE_SIZE 30      // 큐 크기 설정
 #define LOG_MSG_SIZE 128       // 로그 메시지 크기 설정
 
 void enqueue_log(const char *message); // 로그 메시지를 큐에 추가하는 함수
@@ -130,7 +130,7 @@ struct ScheduleData // ScheduleDB 멤버변수 중 릴레이 제어에 쓰일 �
   struct tm timeInfo; // 스케줄 동작 시각 로그
 };
 QueueHandle_t scheduleQueue;   // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
-#define SCHEDULE_QUEUE_SIZE 20 // 큐 크기 설정
+#define SCHEDULE_QUEUE_SIZE 30 // 큐 크기 설정
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -195,7 +195,7 @@ bool atMode = true;
 #define MQTT_SERVER "broker.hivemq.com" // BROKER_ID로 대체
 
 // 241114 TOPIC 구조 개편
-const String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/refresh
+const String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/state
 const String PUB_TOPIC = "type1sc";          // 발행 주제: type1sc/farmtalkSwitch00/update;
 const String PUB_TOPIC_SENSOR = "type1sc";   // 센서 발행 주제 type1sc/farmtalkSwitch00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
 const String PUB_TOPIC_SCHEDULE = "type1sc"; // 스케줄 발행 주제 type1sc/farmtalkSwitch00/{스케줄기능토픽}; 페이로드: 스케줄 JSON
@@ -219,9 +219,10 @@ String DEVICE_TOPIC; // /farmtalkSwitch00
 void publishSensorData();         // 센서값 발행
 void publishModbusSensorResult(); // 센서 modbus 오류 시 결과 발행
 
-QueueHandle_t publishQueue;   // 메시지 publish를 위한 Queue 생성; 릴레이 제어완료, 센서값 발행
-#define PUBLISH_QUEUE_SIZE 20 // 큐 크기 설정
-#define PUBLISH_MSG_SIZE 128  // 발행 메시지 크기 설정
+QueueHandle_t publishQueue;      // 메시지 publish를 위한 Queue 생성; 릴레이 제어완료, 센서값 발행
+#define PUBLISH_QUEUE_SIZE 20    // 큐 크기 설정
+#define PUBLISH_MSG_SIZE_MIN 128 // 발행 메시지 크기 설정
+#define PUBLISH_MSG_SIZE 1024    // 발행 메시지 크기 설정
 
 void enqueue_MqttMsg(const char *message); // MQTT 메시지를 큐에 추가하는 함수
 
@@ -339,7 +340,6 @@ String testMsg2 = "";
 String testMsg3 = "";
 String testMsg4 = "";
 String testMsg5 = "";
-int testBit = -1;
 
 // pppos client task보다 우선하는 modbus task
 void ModbusTask_Relay_8ch(void *pvParameters)
@@ -917,8 +917,6 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 
         // Write Relay: No Delay
         modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
-        // DebugSerial.print("modbus_Relay_result: ");
-        // DebugSerial.println(modbus_Relay_result);
 
       } // if No Delay
       else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
@@ -943,8 +941,6 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 
         // Write Relay: Delay
         modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-        // DebugSerial.print("modbus_Relay_result: ");
-        // DebugSerial.println(modbus_Relay_result);
       }
 
       if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
@@ -1033,7 +1029,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -1112,7 +1108,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -1192,7 +1188,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -3428,54 +3424,54 @@ void setup()
       DebugSerial.println("Starting PPPOS... Failed");
     }
 
-    // 로그 큐 생성
+    // 로그 큐 생성, 최대 30개의 Log 메시지를 보관할 수 있습니다.
     logQueue = xQueueCreate(LOG_QUEUE_SIZE, sizeof(char) * LOG_MSG_SIZE);
     if (logQueue == NULL)
     {
-      Serial.println("Failed to create log queue");
+      DebugSerial.println("Failed to create log queue");
       return;
     }
 
     // Modbus 큐 생성
-    modbusQueue = xQueueCreate(10, sizeof(ModbusData));
+    modbusQueue = xQueueCreate(20, sizeof(ModbusData));
     if (modbusQueue == NULL)
     {
-      Serial.println("Failed to create Modbus queue.");
+      DebugSerial.println("Failed to create Modbus queue.");
     }
 
-    // scheduleQueue 생성, 최대 10개의 ScheduleData 항목을 보관할 수 있습니다.
+    // scheduleQueue 생성, 최대 30개의 ScheduleData 항목을 보관할 수 있습니다.
     scheduleQueue = xQueueCreate(SCHEDULE_QUEUE_SIZE, sizeof(ScheduleData));
     if (scheduleQueue == NULL)
     {
-      Serial.println("Failed to create schedule queue");
+      DebugSerial.println("Failed to create schedule queue");
     }
 
-    // publishQueue 생성, 최대 15개의 publish 메시지를 보관할 수 있습니다.
+    // publishQueue 생성, 최대 20개의 publish 메시지를 보관할 수 있습니다.
     publishQueue = xQueueCreate(PUBLISH_QUEUE_SIZE, sizeof(char) * PUBLISH_MSG_SIZE);
     if (publishQueue == NULL)
     {
-      Serial.println("Failed to create publish queue");
+      DebugSerial.println("Failed to create publish queue");
     }
 
     // NTP 동기화 태스크 생성
     xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
     // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 태스크 생성
-    xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 2048, NULL, 6, NULL);
+    xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 4096, NULL, 6, NULL);
 
     // 로그 출력 태스크 생성 - [구현 요] 문제 발생: overflow 발생 하는 듯
-    xTaskCreate(log_print_task, "Log Print Task", 2048, NULL, 4, NULL);
+    xTaskCreate(log_print_task, "log_print_task", 4096, NULL, 4, NULL);
 
     // 메시지 발행 태스크 생성
-    xTaskCreate(msg_publish_task, "msg_publish_task", 2048, NULL, 4, NULL);
+    xTaskCreate(msg_publish_task, "msg_publish_task", 4096, NULL, 4, NULL);
 
     if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
     {
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_8ch, "ModbusTask_Relay_8ch", 2048, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "ModbusTask_Relay_8ch_Schedule", 2048, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     if (relayId == "relayId_16ch")
@@ -3483,8 +3479,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_16ch, "ModbusTask_Relay_16ch", 2048, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "ModbusTask_Relay_16ch_Schedule", 2048, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     // 온습도 센서 task 생성 및 등록 (우선순위: 6)
@@ -3503,7 +3499,7 @@ void setup()
       // DebugSerial.print("slaveId_th: ");
       // DebugSerial.println(slaveId_th);
 
-      xTaskCreate(&ModbusTask_Sensor_th, "ModbusTask_th", 2048, NULL, 6, NULL);
+      xTaskCreate(&ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
     }
 
     // TM100 센서 task 생성 및 등록 (우선순위: 6)
@@ -3522,7 +3518,7 @@ void setup()
       // DebugSerial.print("slaveId_tm100: ");
       // DebugSerial.println(slaveId_tm100);
 
-      xTaskCreate(&ModbusTask_Sensor_tm100, "ModbusTask_tm100", 2048, NULL, 6, NULL);
+      xTaskCreate(&ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
     }
 
     // 감우 센서 task 생성 및 등록 (우선순위: 6)
@@ -3542,7 +3538,7 @@ void setup()
       // DebugSerial.print("slaveId_rain: ");
       // DebugSerial.println(slaveId_rain);
 
-      xTaskCreate(&ModbusTask_Sensor_rain, "ModbusTask_rain", 2048, NULL, 6, NULL);
+      xTaskCreate(&ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
     }
 
     // 지온·지습·EC 센서 task 생성 및 등록 (우선순위: 6)
@@ -3561,7 +3557,7 @@ void setup()
       // DebugSerial.print("slaveId_ec: ");
       // DebugSerial.println(slaveId_ec);
 
-      xTaskCreate(&ModbusTask_Sensor_ec, "ModbusTask_ec", 2048, NULL, 6, NULL);
+      xTaskCreate(&ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
     }
 
     // 수분장력 센서 task 생성 및 등록 (우선순위: 6)
@@ -3580,7 +3576,7 @@ void setup()
       // DebugSerial.print("slaveId_soil: ");
       // DebugSerial.println(slaveId_soil);
 
-      xTaskCreate(&ModbusTask_Sensor_soil, "ModbusTask_soil", 2048, NULL, 6, NULL);
+      xTaskCreate(&ModbusTask_Sensor_soil, "Task_soil", 2048, NULL, 6, NULL);
     }
   }
 }
