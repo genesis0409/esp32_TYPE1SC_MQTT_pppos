@@ -116,6 +116,8 @@ time_t current_time;          // NTP 동기화 후 저장되는 기준 시간
 TickType_t lastSyncTickCount; // 마지막 동기화 시점의 Tick Count
 bool isNTPtimeUpdated = false;
 
+struct tm timeInfo_ESP_Updated; // [전역] ESP에서 업데이트된 현재시간정보 - 디버그 로그에 사용
+
 static QueueHandle_t logQueue; // 로그 메시지를 저장할 큐
 #define LOG_QUEUE_SIZE 30      // 큐 크기 설정
 #define LOG_MSG_SIZE 128       // 로그 메시지 크기 설정
@@ -1417,10 +1419,9 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
       time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
 
       // 현재 시간 정보 로깅
-      struct tm timeInfo;
-      localtime_r(&updated_time, &timeInfo);
-      int updated_Day = timeInfo.tm_yday;
-      int updated_Weekday = timeInfo.tm_wday; // 0=일요일, 6=토요일
+      localtime_r(&updated_time, &timeInfo_ESP_Updated);
+      int updated_Day = timeInfo_ESP_Updated.tm_yday;
+      int updated_Weekday = timeInfo_ESP_Updated.tm_wday; // 0=일요일, 6=토요일
 
       ScheduleData data;
 
@@ -1436,66 +1437,72 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
           switch (schedule.getWMode()) // 스케줄 별 릴레이 동작 수행
           {
           case 0: // 일회성 모드
-            if (compareDate(timeInfo, schedule.getTime()) && !schedule.hasExecutedToday())
+            if (compareDate(timeInfo_ESP_Updated, schedule.getTime()) && !schedule.hasExecutedToday())
             {
               // 스케줄데이터 구조체에 할당
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
-              data.timeInfo = timeInfo;
+              data.timeInfo = timeInfo_ESP_Updated;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
               {
-                Serial.println("Failed to send [One-Day] Schedule Data to Queue");
+                DebugSerial.println("Failed to send [One-Day] Schedule Data to Queue");
               }
-
-              schedule.setExecutedToday(true);
+              else
+              {
+                schedule.setExecutedToday(true);
+              }
             }
             break;
 
           case 1: // 매일 모드
-            if (compareTime(timeInfo, schedule.getTime()) && !schedule.hasExecutedToday())
+            if (compareTime(timeInfo_ESP_Updated, schedule.getTime()) && !schedule.hasExecutedToday())
             {
               // 스케줄데이터 구조체에 할당
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
-              data.timeInfo = timeInfo;
+              data.timeInfo = timeInfo_ESP_Updated;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
               {
-                Serial.println("Failed to send [Daily] Schedule Data to Queue");
+                DebugSerial.println("Failed to send [Daily] Schedule Data to Queue");
               }
-
-              schedule.setExecutedToday(true);
+              else
+              {
+                schedule.setExecutedToday(true);
+              }
             }
             break;
 
           case 2: // 요일별 모드
             // 요일에 맞는지 확인 후 동작 수행
-            if (compareTime(timeInfo, schedule.getTime()) && schedule.getWeekDay(updated_Weekday) && !schedule.hasExecutedToday()) // 요일 비교
+            if (compareTime(timeInfo_ESP_Updated, schedule.getTime()) && schedule.getWeekDay(updated_Weekday) && !schedule.hasExecutedToday()) // 요일 비교
             {
               // 스케줄데이터 구조체에 할당
               data.num = schedule.getNum();
               data.value = schedule.getValue();
               data.delay = schedule.getDelay();
-              data.timeInfo = timeInfo;
+              data.timeInfo = timeInfo_ESP_Updated;
 
               // 큐에 데이터 전송
               if (xQueueSend(scheduleQueue, &data, portMAX_DELAY) != pdPASS)
               {
-                Serial.println("Failed to send [Weekly] Schedule Data to Queue");
+                DebugSerial.println("Failed to send [Weekly] Schedule Data to Queue");
               }
-
-              schedule.setExecutedToday(true);
+              else
+              {
+                schedule.setExecutedToday(true);
+              }
             }
             break;
           } // switch (schedule.getWMode())
 
         } // if (schedule.getEnable())
-      }
+      } // for (auto &item : manager.getAllSchedules())
 
       // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
 
