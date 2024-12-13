@@ -107,6 +107,7 @@ const uint8_t httpTryLimit = 3;        // http 통신 시도 한계 횟수
 bool farmtalkServerResult = false;     // 서버 발 사용자 등록 결과
 int farmtalkServerLoginResult = -1;    // 서버 발 사용자 로그인 결과; 0이면 성공
 int farmtalkServerScheduleResult = -1; // 서버 발 스케줄 정보 수신 결과
+int scount = 0;                        // 스케줄 총 개수: 5로 나누어 페이지 수(5개단위)를 계산해 페이지당 한 번씩 + 페이지 수 만큼 HTTP 요청
 
 void getTime(); // TYPE1SC 모듈에서 AT커맨드를 사용한 시간 정보 업데이트 함수
 
@@ -2164,7 +2165,7 @@ void log_print_task(void *pvParameters)
       // 로그 메시지 시리얼 포트로 출력
       DebugSerial.println(logMsg);
     }
-    // vTaskDelay(300);
+    vTaskDelay(500);
   }
 }
 
@@ -2196,23 +2197,36 @@ void msg_publish_task(void *pvParameters)
       // publish; 발행
       client.publish((mqttStr[0]).c_str(), (mqttStr[1]).c_str()); // {topic}, {payload}
 
+      // 디버그 로그
+      // mqttStr[4]이 존재하고 값이 비어 있지 않다면
+      if (mqttStr[4].length() > 0)
+      {
+        DebugSerial.print("[TIME LOG] ");
+        DebugSerial.println((mqttStr[4]).c_str()); // 현재 시간 값
+      }
       DebugSerial.print("Debug Topic: ");
       DebugSerial.println((mqttStr[0]).c_str());
       DebugSerial.print("Debug Payload: ");
+      DebugSerial.println((mqttStr[1]).c_str());
+      // mqttStr[2]이 존재하고 값이 비어 있지 않다면
+      if (mqttStr[2].length() > 0)
+      {
+        DebugSerial.print("Debug Result: ");
+        DebugSerial.println((mqttStr[2]).c_str()); // modbus Result
+      }
       // mqttStr[3]이 존재하고 값이 비어 있지 않다면
       if (mqttStr[3].length() > 0)
       {
-        DebugSerial.print((mqttStr[3]).c_str()); // 스케줄 시간 값
-        DebugSerial.print(" ");
+        DebugSerial.print("Debug Schedule Time: ");
+        DebugSerial.println((mqttStr[3]).c_str()); // 스케줄 시간 값
       }
-      DebugSerial.println((mqttStr[1]).c_str());
-      DebugSerial.print("Debug Result: ");
-      DebugSerial.println((mqttStr[2]).c_str()); // modbus Result
+
+      DebugSerial.println();
 
       // [미구현] publishSensorData() 개편 보류
       // [미구현] publishModbusSensorResult() 개편 보류
     }
-    vTaskDelay(300);
+    vTaskDelay(500);
   }
 }
 
@@ -2654,31 +2668,31 @@ void publishModbusSensorResult()
   if (allowsPublishSensor_result_th)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
-    // DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
+    DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
     allowsPublishSensor_result_th = false;
   }
   if (allowsPublishSensor_result_tm100)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
-    // DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
+    DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
     allowsPublishSensor_result_tm100 = false;
   }
   if (allowsPublishSensor_result_rain)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
-    // DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
+    DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
     allowsPublishSensor_result_rain = false;
   }
   if (allowsPublishSensor_result_ec)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
-    // DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
+    DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
     allowsPublishSensor_result_ec = false;
   }
   if (allowsPublishSensor_result_soil)
   {
     client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
-    // DebugSerial.println("ModbusSensorError_soil result: " + String(modbus_Sensor_result_soil));
+    DebugSerial.println("ModbusSensorError_soil result: " + String(modbus_Sensor_result_soil));
     allowsPublishSensor_result_soil = false;
   }
 }
@@ -3136,20 +3150,6 @@ void setup()
   M1Serial.begin(SERIAL_BR);
   DebugSerial.begin(SERIAL_BR);
 
-  // /* TYPE1SC Module Initialization */
-  // if (TYPE1SC.init())
-  // {
-  //   DebugSerial.println("TYPE1SC Module Error!!!");
-  // }
-
-  // /* Network Registration Check */
-  // while (TYPE1SC.canConnect() != 0)
-  // {
-  //   DebugSerial.println("Network not Ready!!!");
-  //   delay(2000);
-  // }
-  // DebugSerial.println("TYPE1SC Module Ready!!!");
-
   delay(1000); // Serial.begin() takes some time...
   DebugSerial.println("init SPIFFS...");
   // File System Setup
@@ -3451,7 +3451,7 @@ void setup()
     DebugSerial.print("BROKER_PORT: ");
     DebugSerial.println(BROKER_PORT);
 
-    //_HOST_ID 와 _PORT 둘중 하나라도 비어있을 때(== 초기 생성 로직) http 메시지 송신
+    // _HOST_ID 와 _PORT 둘중 하나라도 비어있을 때(== 초기 생성 로직) http 메시지 송신
     if (BROKER_ID == "" || BROKER_PORT == "")
     {
       DebugSerial.print("[ALERT] Create DB Process...");
@@ -3653,6 +3653,7 @@ void setup()
         }
         delay(2000); // 2초 후 재시도
       } // while (최대 3회)
+      httpTryCount = 0; // http 통신 시도 횟수 초기화
 
       // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
       // 일단 미구현; 성공한다고 가정
@@ -3676,7 +3677,6 @@ void setup()
         // ESP.restart();
       }
 
-      httpTryCount = 0; // http 통신 시도 횟수 초기화
     } // if (BROKER_ID == "" || BROKER_PORT == "")
 
     httpRecvOK = false; // http 메시지 수신 여부 초기화
@@ -3838,6 +3838,8 @@ void setup()
               const char *host = doc["host"];
               int port = doc["port"];
 
+              scount = doc["scount"]; // 스케줄 총 개수: 5로 나누어 페이지 수(5개단위)를 계산해 페이지당 한 번씩 + 페이지 수 만큼 HTTP 요청
+
               // 결과 출력
               DebugSerial.print("Login result: ");
               DebugSerial.println(farmtalkServerLoginResult == 0 ? "true" : String(farmtalkServerLoginResult));
@@ -3845,6 +3847,9 @@ void setup()
               DebugSerial.println(host);
               DebugSerial.print("port: ");
               DebugSerial.println(port);
+
+              DebugSerial.print("scount: ");
+              DebugSerial.println(scount);
 
               // result가 0이 아니면 로그인 실패
               if (farmtalkServerLoginResult != 0)
@@ -3886,6 +3891,7 @@ void setup()
         }
         delay(2000); // 2초 후 재시도
       } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
+      httpTryCount = 0; // http 통신 시도 횟수 초기화
 
       // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
       // 일단 미구현; 성공한다고 가정
@@ -3909,8 +3915,7 @@ void setup()
         // ESP.restart();
       }
 
-      httpTryCount = 0; // http 통신 시도 횟수 초기화
-    }
+    } // if (farmtalkServerResult == false || (BROKER_ID != "" && BROKER_PORT != ""))
 
     httpRecvOK = false; // http 메시지 수신 여부 초기화
 
@@ -3918,144 +3923,155 @@ void setup()
     {
       DebugSerial.print("[ALERT] Download Schedule Info Process...");
 
-      // Use TCP Socket
-      /********************************/
-      String data = "GET /api/Auth/GetSchedule?";
-      data += "id=" + mqttUsername;
+      int schedulePages = (scount + 4) / 5; // 올림 처리를 위한 계산: (11+4)=15 /3 -> 3페이지
+      DebugSerial.print(" schedulePages: ");
+      DebugSerial.println(schedulePages);
 
-      data += " HTTP/1.1\r\n";
-      data += "Host: " + String(IPAddr) + "\r\n";
-      data += "Connection: keep-alive\r\n\r\n";
-
-      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
-      // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
-      // String data = "http://gh.farmtalk.kr:5038/api/Auth/GetSchedule?id=daon";
-
-      // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
-      while (!httpRecvOK && httpTryCount++ < httpTryLimit)
+      for (int i = 0; i < schedulePages; i++) // 페이지 수 만큼 HTTP 요청
       {
-        /* 3-1 :TCP Socket Send Data */
-        if (TYPE1SC.socketSend(data.c_str()) == 0)
-        {
-          DebugSerial.print("[HTTP Send] >> ");
-          DebugSerial.println(data);
-#if defined(USE_LCD)
-          u8x8log.print("[HTTP Send] >> ");
-          u8x8log.print(data);
-          u8x8log.print("\n");
-#endif
-        }
-        else
-        {
-          DebugSerial.println("Send Fail!!!");
-#if defined(USE_LCD)
-          u8x8log.print("Send Fail!!!\n");
-#endif
-        }
+        httpRecvOK = false; // http 메시지 수신 여부 초기화
 
-        /* 4-1 :TCP Socket Recv Data */
-        if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
-        {
-          DebugSerial.print("[RecvSize] >> ");
-          DebugSerial.println(recvSize);
-          DebugSerial.print("[Recv] >> ");
-          DebugSerial.println(recvBuffer);
-#if defined(USE_LCD)
-          u8x8log.print("[RecvSize] >> ");
-          u8x8log.print(recvSize);
-          u8x8log.print("\n");
-          u8x8log.print("[Recv] >> ");
-          u8x8log.print(recvBuffer);
-          u8x8log.print("\n");
-#endif
+        // Use TCP Socket
+        /********************************/
+        String data = "GET /api/Auth/GetSchedulePage?";
+        data += "id=" + mqttUsername + "&";
+        data += "page=" + String(i);
 
-          // http 메시지 처리
-          // 1. 헤더와 바디 분리
-          const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
-          if (jsonStart == NULL)
+        data += " HTTP/1.1\r\n";
+        data += "Host: " + String(IPAddr) + "\r\n";
+        data += "Connection: keep-alive\r\n\r\n";
+
+        // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
+        // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
+        // String data = "http://gh.farmtalk.kr:5038/api/Auth/GetSchedulePage?id=daon&page={0~n}";
+
+        // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
+        while (!httpRecvOK && httpTryCount++ < httpTryLimit)
+        {
+          /* 3-1 :TCP Socket Send Data */
+          if (TYPE1SC.socketSend(data.c_str()) == 0)
           {
-            DebugSerial.println("Cannot find Http Header...");
-            httpRecvOK = false;
+            DebugSerial.print("[HTTP Send] >> ");
+            DebugSerial.println(data);
+#if defined(USE_LCD)
+            u8x8log.print("[HTTP Send] >> ");
+            u8x8log.print(data);
+            u8x8log.print("\n");
+#endif
           }
-          else // JSON 구분 성공 시 파싱
+          else
           {
-            // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
-            jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+            DebugSerial.println("Send Fail!!!");
+#if defined(USE_LCD)
+            u8x8log.print("Send Fail!!!\n");
+#endif
+          }
 
-            // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
-            const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
-            if (jsonPart == NULL)
+          /* 4-1 :TCP Socket Recv Data */
+          if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+          {
+            DebugSerial.print("[RecvSize] >> ");
+            DebugSerial.println(recvSize);
+            DebugSerial.print("[Recv] >> ");
+            DebugSerial.println(recvBuffer);
+#if defined(USE_LCD)
+            u8x8log.print("[RecvSize] >> ");
+            u8x8log.print(recvSize);
+            u8x8log.print("\n");
+            u8x8log.print("[Recv] >> ");
+            u8x8log.print(recvBuffer);
+            u8x8log.print("\n");
+#endif
+
+            // http 메시지 처리
+            // 1. 헤더와 바디 분리
+            const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+            if (jsonStart == NULL)
             {
-              DebugSerial.println("Cannot find JSON data...");
+              DebugSerial.println("Cannot find Http Header...");
+              httpRecvOK = false;
             }
-            else
+            else // JSON 구분 성공 시 파싱
             {
-              // http메시지 저장 로직
-              parseHttpAndAddSchedule(jsonPart);
+              // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+              jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
 
-              httpRecvOK = true;
+              // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+              const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
+              if (jsonPart == NULL)
+              {
+                DebugSerial.println("Cannot find JSON data...");
+              }
+              else
+              {
+                // http메시지 저장 로직
+                parseHttpAndAddSchedule(jsonPart);
 
-              // 디버그 모든 스케줄 출력
-              manager.printAllSchedules();
+                httpRecvOK = true;
 
-            } // if jsonPart == NULL
-          } // if jsonStart == NULL
-        } // if TYPE1SC.socketRecv()
-        else
+              } // if jsonPart == NULL
+            } // if jsonStart == NULL
+          } // if TYPE1SC.socketRecv()
+          else
+          {
+            httpRecvOK = false;
+            DebugSerial.println("Recv Fail!!!");
+#if defined(USE_LCD)
+            u8x8log.print("Recv Fail!!!\n");
+#endif
+          }
+          delay(2000); // 2초 후 재시도
+        } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
+        httpTryCount = 0; // http 통신 시도 횟수 초기화
+
+        // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+        // 일단 미구현; 성공한다고 가정
+        if (httpRecvOK == false)
         {
-          httpRecvOK = false;
-          DebugSerial.println("Recv Fail!!!");
-#if defined(USE_LCD)
-          u8x8log.print("Recv Fail!!!\n");
-#endif
+          // DebugSerial.println("[ALERT] Server Returns result: false...");
+          // DebugSerial.println("Running Factory Reset...");
+
+          // SPIFFS.remove(mqttUsernamePath);
+          // SPIFFS.remove(mqttPwPath);
+          // SPIFFS.remove(sensorId_01Path);
+          // SPIFFS.remove(sensorId_02Path);
+          // SPIFFS.remove(relayIdPath);
+          // SPIFFS.remove(BROKER_IDPath);
+          // SPIFFS.remove(BROKER_PORTPath);
+
+          // DebugSerial.println("Factory Reset Complete.");
+
+          // DebugSerial.println("ESP will restart.");
+          // delay(1000);
+          // ESP.restart();
         }
-        delay(2000); // 2초 후 재시도
-      } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
 
-      /* 5 :TCP Socket DeActivation */
-      if (TYPE1SC.socketDeActivate() == 0)
-      {
-        DebugSerial.println("TCP Socket DeActivation!!!");
-#if defined(USE_LCD)
-        u8x8log.print("TCP Socket DeActivation!!!\n");
-#endif
-      }
+      } // for (int i = 0; i < schedulePages; i++)
 
-      if (TYPE1SC.socketInfo(sckInfo, sizeof(sckInfo)) == 0)
-      {
-        DebugSerial.print("Socket Info : ");
-        DebugSerial.println(sckInfo);
-#if defined(USE_LCD)
-        u8x8log.print("Socket Info : ");
-        u8x8log.print(sckInfo);
-        u8x8log.print("\n");
-#endif
-      }
+      // 디버그 모든 스케줄 출력
+      manager.printAllSchedules();
 
-      // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
-      // 일단 미구현; 성공한다고 가정
-      if (httpRecvOK == false)
-      {
-        // DebugSerial.println("[ALERT] Server Returns result: false...");
-        // DebugSerial.println("Running Factory Reset...");
-
-        // SPIFFS.remove(mqttUsernamePath);
-        // SPIFFS.remove(mqttPwPath);
-        // SPIFFS.remove(sensorId_01Path);
-        // SPIFFS.remove(sensorId_02Path);
-        // SPIFFS.remove(relayIdPath);
-        // SPIFFS.remove(BROKER_IDPath);
-        // SPIFFS.remove(BROKER_PORTPath);
-
-        // DebugSerial.println("Factory Reset Complete.");
-
-        // DebugSerial.println("ESP will restart.");
-        // delay(1000);
-        // ESP.restart();
-      }
-
-      httpTryCount = 0; // http 통신 시도 횟수 초기화
     } // if (farmtalkServerLoginResult == 0)
+
+    /* 5 :TCP Socket DeActivation */
+    if (TYPE1SC.socketDeActivate() == 0)
+    {
+      DebugSerial.println("TCP Socket DeActivation!!!");
+#if defined(USE_LCD)
+      u8x8log.print("TCP Socket DeActivation!!!\n");
+#endif
+    }
+
+    if (TYPE1SC.socketInfo(sckInfo, sizeof(sckInfo)) == 0)
+    {
+      DebugSerial.print("Socket Info : ");
+      DebugSerial.println(sckInfo);
+#if defined(USE_LCD)
+      u8x8log.print("Socket Info : ");
+      u8x8log.print(sckInfo);
+      u8x8log.print("\n");
+#endif
+    }
 
     /* 6 :TCP Socket DeActivation */
     if (TYPE1SC.socketClose() == 0)
