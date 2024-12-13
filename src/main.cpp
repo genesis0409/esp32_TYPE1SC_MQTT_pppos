@@ -19,7 +19,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h" // 로깅 시스템을 별도로 분리하기 위한 freertos 큐
-#include "apps/sntp/sntp.h" //Simplified Network Time Protocol 관련 함수를 사용
+#include "apps/sntp/sntp.h" // Simplified Network Time Protocol 관련 함수를 사용
+
+#include <freertos/semphr.h>
+SemaphoreHandle_t xSerialSemaphore = NULL; // Modbus 작업이 동시에 실행되지 않도록 **Mutex (뮤텍스)**를 사용해 SerialPort 접근을 제어
+                                           // 모든 Task는 xSerialSemaphore를 사용해 SerialPort 접근 권한을 요청합니다.
+                                           // 하나의 Task가 SerialPort를 사용하는 동안 다른 Task는 대기합니다.
 
 #include "ScheduleDB.h"
 #include "config.h"
@@ -343,29 +348,20 @@ String testMsg1 = "";
 String testMsg2 = "";
 String testMsg3 = "";
 String testMsg4 = "";
-String testMsg5 = "";
 
-// pppos client task보다 우선하는 modbus task
+// pppos client task보다 우선하는 modbus task - 8ch Relay Control: Manual
 void ModbusTask_Relay_8ch(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Relay_result = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 1
-  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -373,149 +369,406 @@ void ModbusTask_Relay_8ch(void *pvParameters)
   modbus.postTransmission(postTransmission);
 
   ModbusData receivedData;
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
   {
-    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
+    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS) // Queue에서 데이터를 받아 처리
     {
-      // Queue에서 데이터를 받아 처리
-      uint16_t localWritingRegisters[4];
-      memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
-      uint16_t readingStatusRegister[1] = {0}; // refresh 메시지: 상태 반환용
-
-      // refresh 메시지일 경우 릴레이 상태 업데이트
-      if (receivedData.rStr[0] == "refresh")
+      if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
       {
-        // relay status
-        modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03
+        // Semaphore 허용 시
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+        /* Serial1 Initialization */
+        // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+        // Modbus slave ID 1
+        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
+
+        // 이하 Modbus 작업 수행
+        uint16_t localWritingRegisters[4];
+        memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
+        uint16_t readingStatusRegister[1] = {0}; // state 토픽: 상태 반환용
+
+        // state 토픽일 경우 릴레이 상태 및 센서 상태 업데이트
+        if (receivedData.rStr[0] == "state")
         {
-          // 큐에 전달할 데이터 구성: {topic}$256&refresh
-          readingStatusRegister[0] = modbus.getResponseBuffer(0);
+          // 재시도 로직
+          // int retryCount = 0;
+          // const int maxRetries = 3;                                // 최대 재시도 횟수
+          // const TickType_t retryDelay = 1000 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/status"; // topic(상태)
-          pubMsg += "$";                                                       // 구분자
-          pubMsg += readingStatusRegister[0];                                  // 릴레이 상태값
-          pubMsg += "&";                                                       // 페이로드 구분자
-          pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
+          // while ((modbus_Relay_result != modbus.ku8MBSuccess || modbus_Relay_result != modbus.ku8MBInvalidSlaveID) && retryCount < maxRetries)
+          // {
+          //   retryCount++;
+          //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
 
-          pubMsg += "$";
-          pubMsg += modbus_Relay_result;
+          //   // relay status
+          //   modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03, 재시도
+          // }
 
-          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-        }
-      }
+          // relay status
+          modbus_Relay_result = modbus.readHoldingRegisters(READ_START_ADDRESS, READ_QUANTITY); // 0x03
 
-      // (r1~r8) 일반적인 릴레이 제어 작업
-      else
-      {
-        uint16_t selector_relay = BIT_SELECT << receivedData.index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+          DebugSerial.println("[Debug Point 02] Modbus State Done.");
 
-        if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
-        {
-          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          // 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+          DebugSerial.print("Modbus Relay Result: ");
+          DebugSerial.println(modbus_Relay_result);
+
+          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
           {
-            localWritingRegisters[2] = selector_relay | BIT_ON << receivedData.index_relay;
-          }
-          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+            // 릴레이 상태값 획득
+            readingStatusRegister[0] = modbus.getResponseBuffer(0);
+
+            // JSON 문서 크기 설정 (적절한 크기로 조정 필요)
+            // const size_t capacity =
+            //     JSON_OBJECT_SIZE(2)         // 최상위 객체 크기
+            //     + JSON_ARRAY_SIZE(5)        // sensors 배열
+            //     + JSON_OBJECT_SIZE(2) * 5   // sensors 배열의 객체들
+            //     + JSON_ARRAY_SIZE(16)       // relay 배열
+            //     + JSON_OBJECT_SIZE(2) * 16; // relay 배열의 객체들
+            // DynamicJsonDocument doc(capacity); // 872U
+            StaticJsonDocument<1024> doc;
+
+            // Sensors 배열 생성
+            JsonArray sensors = doc.createNestedArray("sensors");
+
+            // 예제: 센서 데이터 추가
+            // for (int i = 0; i < 3; i++)
+            // { // 센서 개수만큼 반복
+            //   JsonObject sensor = sensors.createNestedObject();
+            //   sensor["ecode"] = i + 1;  // 센서 ID
+            //   sensor["val"] = 17.3 + i; // 임의 값
+            // }
+
+            // 온습도 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
+            {
+              JsonObject sensor_temp = sensors.createNestedObject();
+              sensor_temp["ecode"] = 1;  // 온도/1
+              sensor_temp["val"] = temp; // 임의 값
+
+              JsonObject sensor_humi = sensors.createNestedObject();
+              sensor_humi["ecode"] = 2;  // 습도/2
+              sensor_humi["val"] = humi; // 임의 값
+            }
+
+            // TM100 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_tm100" || sensorId_02 == "sensorId_tm100")
+            {
+              JsonObject sensor_temp = sensors.createNestedObject();
+              sensor_temp["ecode"] = 1;  // 온도/1
+              sensor_temp["val"] = temp; // 임의 값
+
+              JsonObject sensor_humi = sensors.createNestedObject();
+              sensor_humi["ecode"] = 2;  // 습도/2
+              sensor_humi["val"] = humi; // 임의 값
+            }
+
+            // 감우 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_rain" || sensorId_02 == "sensorId_rain")
+            {
+              JsonObject sensor_rain = sensors.createNestedObject();
+              sensor_rain["ecode"] = 4;     // 감우/4
+              sensor_rain["val"] = isRainy; // 임의 값
+            }
+
+            // 지온·지습·EC 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_ec" || sensorId_02 == "sensorId_ec")
+            {
+              JsonObject sensor_ec = sensors.createNestedObject();
+              sensor_ec["ecode"] = 12; // EC/12
+              sensor_ec["val"] = ec;   // 임의 값
+
+              JsonObject sensor_soilTemp = sensors.createNestedObject();
+              sensor_soilTemp["ecode"] = 17;     // 지온/17
+              sensor_soilTemp["val"] = soilTemp; // 임의 값
+
+              JsonObject sensor_soilHumi = sensors.createNestedObject();
+              sensor_soilHumi["ecode"] = 14;     // 지습/14
+              sensor_soilHumi["val"] = soilHumi; // 임의 값
+            }
+
+            // 수분장력 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_soil" || sensorId_02 == "sensorId_soil")
+            {
+              JsonObject sensor_soilPotential = sensors.createNestedObject();
+              sensor_soilPotential["ecode"] = 15;          // 수분장력/15
+              sensor_soilPotential["val"] = soilPotential; // 임의 값
+            }
+
+            // Relay 상태값
+            uint16_t relayState = readingStatusRegister[0];
+
+            // 예제: 릴레이 데이터 추가
+            // for (int i = 0; i < 2; i++)
+            // { // 릴레이 개수만큼 반복
+            //   JsonObject relayObj = relay.createNestedObject();
+            //   relayObj["num"] = i + 1;        // 릴레이 번호
+            //   relayObj["val"] = (i % 2 == 0); // 임의로 true/false 설정
+            // }
+
+            if (relayId == "relayId_4ch")
+            {
+              int relayChannels = 4;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+            else if (relayId == "relayId_8ch")
+            {
+              int relayChannels = 8;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+            else if (relayId == "relayId_16ch")
+            {
+              int relayChannels = 16;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+
+            // JSON 페이로드 출력
+            String jsonPayload;
+            serializeJson(doc, jsonPayload);
+
+            DebugSerial.print("[Debug Point 03] relayState: ");
+            DebugSerial.println(relayState);
+            printBinary8(relayState);
+            // DebugSerial.println("Debugging jsonPayload:");
+            // DebugSerial.println(jsonPayload);
+
+            // String의 메모리 비효율성을 개선한 코드
+            char pubMsg[PUBLISH_MSG_SIZE];
+            int offset = 0; // 현재 버퍼의 위치 관리
+            int written;    // snprintf 반환값 저장
+
+            // 큐에 전달할 데이터 구성: {topic}${jsonPayload}${ModbusResult}$$[{Time_ESP}]
+            // [0]: Topic
+            // [1]: Payload
+            // [2]: Modbus Result
+            // [3]: Schedule Time
+            // [4]: Current Time
+
+            // [0], [1] 발행 토픽과 페이로드, 구분자 추가: {topic}${jsonPayload}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
+                               "%s%s%s$%s$",
+                               PUB_TOPIC, DEVICE_TOPIC, "/restate",
+                               jsonPayload.c_str());
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [2] Modbus Result 추가: {ModbusResult}$$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "%d$$", modbus_Relay_result);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [3] 스케줄 시간 정보 없음
+
+            // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]", timeBuffer);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+          else // 실패 시
           {
-            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
+            DebugSerial.println("[Debug Point 04] Modbus State Failed.");
+
+            // 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+            DebugSerial.print("Modbus Relay Result: ");
+            DebugSerial.println(modbus_Relay_result);
           }
-        }
-        else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+        } // if (receivedData.rStr[0] == "state")
+
+        // (r1~r8) 일반적인 릴레이 제어 작업
+        else
         {
-          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          uint16_t selector_relay = BIT_SELECT << receivedData.index_relay + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+
+          if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
           {
-            localWritingRegisters[2] = selector_relay | BIT_OFF << receivedData.index_relay;
+            if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+            {
+              localWritingRegisters[2] = selector_relay | BIT_ON << receivedData.index_relay;
+            }
+            else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+            {
+              localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
+            }
           }
-          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
           {
-            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
+            if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+            {
+              localWritingRegisters[2] = selector_relay | BIT_OFF << receivedData.index_relay;
+            }
+            else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+            {
+              localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
+            }
           }
-        }
 
-        // Write Buffer
-        if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
-        {
-          // testMsg1 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
-        {
-          // testMsg2 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
-        {
-          // testMsg3 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
-        {
-          // testMsg4 = "ok";
-        }
-
-        // Write Relay
-        modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-        // DebugSerial.print("modbus_Relay_result: ");
-        // DebugSerial.println(modbus_Relay_result);
-
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
-        {
-          // DebugSerial.println("MODBUS Writing done.");
-          // testMsg5 = "ok";
-
-          // 큐에 전달할 데이터 구성: {topic}$1&on
-          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC; // topic(수동)
-          pubMsg += "$";                                           // 구분자
-
-          // suffix "/r00" 에서 substring으로 십의 자리, 일의 자리 추출
-          if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
+          // Write Buffer
+          if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
           {
-            pubMsg += receivedData.suffix.substring(2, 3); // 십의 자리 append
+            // testMsg1 = "ok";
           }
-          pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
-          pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
-          pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
+          if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
+          {
+            // testMsg2 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
+          {
+            // testMsg3 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
+          {
+            // testMsg4 = "ok";
+          }
 
-          pubMsg += "$";
-          pubMsg += modbus_Relay_result;
+          // Write Relay
+          modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
 
-          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-        }
-        else // [미구현] 실패 시 에러코드 보내나?
-        {
-          testBit = modbus_Relay_result;
-        }
+          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+          {
+            // DebugSerial.println("MODBUS Writing done.");
 
-        // printBinary16(writingRegisters[2]);
-      }
+            // String의 메모리 비효율성을 개선한 코드
+            char pubMsg[PUBLISH_MSG_SIZE_MIN];
+            int offset = 0; // 현재 버퍼의 위치 관리
+            int written;    // snprintf 반환값 저장
+
+            // 큐에 전달할 데이터 구성: {topic}${num&on}${ModbusResult}$$[{Time_ESP}]
+            // [0]: Topic
+            // [1]: Payload
+            // [2]: Modbus Result
+            // [3]: Schedule Time
+            // [4]: Current Time
+
+            // [0] 발행 토픽과 구분자 추가: {topic}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                               "%s%s%s$",
+                               PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // suffix "/r00" 에서 substring으로 10의 자리, 1의 자리 추출
+            if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
+            {
+              // [1]-1 릴레이 번호 10의 자리 추가: {num
+              written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                                 "%s",
+                                 receivedData.suffix.substring(2, 3));
+              if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+              {
+                DebugSerial.println("Error: Buffer overflow during Payload(num: 10 digits) creation!");
+                return; // 실패 처리
+              }
+              offset += written;
+            }
+
+            // [1]-2 릴레이 번호 1의 자리 및 on/off 정보 추가: {num&on}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                               "%s&%s$",
+                               receivedData.suffix.substring(3), receivedData.rStr[0]);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Payload(num: 1 digits) creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [2] Modbus Result 추가: {ModbusResult}$$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset, "%d$$", modbus_Relay_result);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [3] 스케줄 시간 정보 없음
+
+            // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset, "[%s]", timeBuffer);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+          else // 실패 시
+          {
+            DebugSerial.println("[Debug Point 05] Modbus Relay Failed.");
+
+            // 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+            DebugSerial.print("Modbus Relay Result: ");
+            DebugSerial.println(modbus_Relay_result);
+          }
+
+          // printBinary16(writingRegisters[2]);
+        } // else (r1~r8) 일반적인 릴레이 제어 작업
+
+        // SerialPort 사용 종료
+        xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+
+      } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
     } // if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
+// pppos client task보다 우선하는 modbus task - 8ch Relay Control: Auto(Schedule)
 void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Relay_result = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 1
-  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -534,134 +787,177 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
     // 스케줄 작업에 의한 릴레이 제어
     if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
     {
-      uint8_t index_relay_Schedule = data.num - 1;                                            // [스케줄 제어용] num: 1~; index: 0~
-      uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+      if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
+      {
+        // Semaphore 허용 시
 
-      // 릴레이 제어 작업
-      if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
-      {
-        writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
-        writingRegisters_Schedule[3] = 0;
-      }
-      else if (data.delay > 0)
-      {
-        writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
-        writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
-      }
+        /* Serial1 Initialization */
+        // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+        // Modbus slave ID 1
+        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      if (data.value == true) // ON 동작이면
-      {
-        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+        // 이하 Modbus 작업 수행
+        uint8_t index_relay_Schedule = data.num - 1;                                            // [스케줄 제어용] num: 1~; index: 0~
+        uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule + SHIFT_CONSTANT; // 선택비트: 상위 8비트
+
+        // 릴레이 제어 작업
+        if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
         {
-          writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_ON << index_relay_Schedule;
+          writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+          writingRegisters_Schedule[3] = 0;
         }
-        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        else if (data.delay > 0)
         {
-          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
+          writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
+          writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
         }
-      }
-      else if (data.value == false) // OFF 동작이면
-      {
-        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+
+        if (data.value == true) // ON 동작이면
         {
-          writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_OFF << index_relay_Schedule;
+          if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          {
+            writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_ON << index_relay_Schedule;
+          }
+          else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          {
+            writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
+          }
         }
-        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+        else if (data.value == false) // OFF 동작이면
         {
-          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
+          if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off
+          {
+            writingRegisters_Schedule[2] = selector_relay_Schedule | BIT_OFF << index_relay_Schedule;
+          }
+          else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          {
+            writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
+          }
         }
-      }
 
-      // Write Buffer
-      if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
-      {
-        // testMsg1 = "ok";
-      }
-      if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
-      {
-        // testMsg2 = "ok";
-      }
-      if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
-      {
-        // testMsg3 = "ok";
-      }
-      if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
-      {
-        // testMsg4 = "ok";
-      }
+        // Write Buffer
+        if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
+        {
+          // testMsg1 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
+        {
+          // testMsg2 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
+        {
+          // testMsg3 = "ok";
+        }
+        if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
+        {
+          // testMsg4 = "ok";
+        }
 
-      // Write Relay
-      modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-      // DebugSerial.print("modbus_Relay_result: ");
-      // DebugSerial.println(modbus_Relay_result);
+        // Write Relay
+        modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
 
-      if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
-      {
-        // DebugSerial.println("MODBUS Writing done.");
-        // testMsg5 = "ok";
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+        {
+          // DebugSerial.println("MODBUS Writing done.");
 
-        // 스케줄 작업에 대한 topic/payload 구성해 publish 큐 사용하기
-        // 큐에 전달할 데이터 구성: {topic}$1&on&10
-        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "sh"; // 스케줄 topic(updatesh)
-        pubMsg += "$";                                                  // 구분자
-        // String tempZero = "r";
-        // if (data.num < 10) // 1~9 일때 공백 0 채우기
-        // {
-        //   tempZero += "0";
-        // }
-        // pubMsg += tempZero + data.num; // 릴레이 토픽 "r00" 구성
-        pubMsg += data.num;
-        pubMsg += "&";                       // 릴레이 번호와 페이로드 구분자
-        pubMsg += data.value ? "on" : "off"; // 0, 1정수형으로 해석; on&10 형식으로 구성
-        pubMsg += "&";
-        pubMsg += data.delay;
+          // String의 메모리 비효율성을 개선한 코드
+          char pubMsg[PUBLISH_MSG_SIZE];
+          int offset = 0; // 현재 버퍼의 위치 관리
+          int written;    // snprintf 반환값 저장
 
-        pubMsg += "$";
-        pubMsg += modbus_Relay_result;
+          // 큐에 전달할 데이터 구성: {topic}${1&on&10}${ModbusResult}$[{Time_Schedule}]$[{Time_ESP}]
+          // [0]: Topic
+          // [1]: Payload
+          // [2]: Modbus Result
+          // [3]: Schedule Time
+          // [4]: Current Time
 
-        strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+          // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
+                             "%s%s%s%s$%d&%s&%d$",
+                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
+                             data.num, data.value ? "on" : "off", data.delay);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Schedule_Topic&Payload creation!");
+            return; // 실패 처리
+          }
+          offset += written;
 
-        pubMsg += "$";
-        pubMsg += "[" + String(timeBuffer) + "]";
+          // [2] Modbus Result 추가: {ModbusResult}$
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "%d$", modbus_Relay_result);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+            return; // 실패 처리
+          }
+          offset += written;
 
-        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-      }
-      else // [미구현] 실패 시 에러코드 보내나?
-      {
-        // testBit = modbus_Relay_result;
-      }
-      // // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
-      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
-      // snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d} [RESULT]: %d", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay, modbus_Relay_result);
-      // enqueue_log(logMsg);
+          // [3] 스케줄 시간 정보 포함: [{Time_Schedule}]$
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]$", timeBuffer);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Scheduled_Time string addition!");
+            return; // 실패 처리
+          }
+          offset += written;
 
+          // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]", timeBuffer);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+        } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+        else // 실패 시
+        {
+          DebugSerial.println("[Debug Point 06] Modbus Schedule Failed.");
+
+          // 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+          // 스케줄 동작 시간 정보 포함: [{Time_Schedule}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+          DebugSerial.println("[SCHEDULED TIME] " + String(timeBuffer));
+
+          DebugSerial.print("Modbus Relay Result: ");
+          DebugSerial.println(modbus_Relay_result); // modbus Result
+        }
+
+        // SerialPort 사용 종료
+        xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+
+      } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(200 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
-// pppos client task보다 우선하는 modbus task
+// pppos client task보다 우선하는 modbus task - 16ch Relay Control: Manual
 void ModbusTask_Relay_16ch(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Relay_result = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 1
-  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -669,181 +965,435 @@ void ModbusTask_Relay_16ch(void *pvParameters)
   modbus.postTransmission(postTransmission);
 
   ModbusData receivedData;
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
   while (1)
   {
-    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
+    if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS) // Queue에서 데이터를 받아 처리
     {
-      // Queue에서 데이터를 받아 처리
-      uint16_t localWritingRegisters[4];
-      memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
-      uint16_t localWritingRegisters_Expand[4];
-      memcpy(localWritingRegisters_Expand, receivedData.writingRegisters_Expand, sizeof(localWritingRegisters_Expand));
-      uint16_t readingStatusRegister[1] = {0}; // refresh 메시지: 상태 반환용
-
-      // refresh 메시지일 경우 릴레이 상태 업데이트
-      if (receivedData.rStr[0] == "refresh")
+      if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
       {
-        // relay status
-        modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
+        // Semaphore 허용 시
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+        /* Serial1 Initialization */
+        // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+        // Modbus slave ID 1
+        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
+
+        // 이하 Modbus 작업 수행
+        uint16_t localWritingRegisters[4];
+        memcpy(localWritingRegisters, receivedData.writingRegisters, sizeof(localWritingRegisters));
+        uint16_t localWritingRegisters_Expand[4];
+        memcpy(localWritingRegisters_Expand, receivedData.writingRegisters_Expand, sizeof(localWritingRegisters_Expand));
+        uint16_t readingStatusRegister[1] = {0}; // state 토픽: 상태 반환용
+
+        // state 토픽일 경우 릴레이 상태 및 센서 상태 업데이트
+        if (receivedData.rStr[0] == "state")
         {
-          // 큐에 전달할 데이터 구성: {topic}$256&refresh
-          readingStatusRegister[0] = modbus.getResponseBuffer(0);
+          // // 재시도 로직
+          // int retryCount = 0;
+          // const int maxRetries = 3;                                // 최대 재시도 횟수
+          // const TickType_t retryDelay = 1000 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/status"; // topic(수동)
-          pubMsg += "$";                                                       // 구분자
-          pubMsg += readingStatusRegister[0];                                  // 릴레이 상태값
-          pubMsg += "&";                                                       // 페이로드 구분자
-          pubMsg += receivedData.payloadBuffer;                                // 수신된 페이로드 반송: "refresh"
+          // while ((modbus_Relay_result != modbus.ku8MBSuccess || modbus_Relay_result != modbus.ku8MBInvalidSlaveID) && retryCount < maxRetries)
+          // {
+          //   retryCount++;
+          //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
 
-          pubMsg += "$";
-          pubMsg += modbus_Relay_result;
+          //   // relay status
+          //   modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
+          // }
 
-          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-        }
-      }
+          // relay status
+          modbus_Relay_result = modbus.readHoldingRegisters(EXPAND_READ_START_ADDRESS, EXPAND_READ_QUANTITY); // 0x03
 
-      // (r1~r16) 일반적인 릴레이 제어 작업 (확장 주소 사용)
-      else
-      {
-        uint16_t selector_relay = BIT_SELECT << receivedData.index_relay; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+          DebugSerial.println("[Debug Point 02] Modbus State Done.");
 
-        if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
-        {
-          // rStr[1].toInt() == 0 : 단순 on/off
-          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          // 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+          DebugSerial.print("Modbus Relay Result: ");
+          DebugSerial.println(modbus_Relay_result);
+
+          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
           {
-            localWritingRegisters_Expand[1] = selector_relay;
-            localWritingRegisters_Expand[2] = BIT_ON << receivedData.index_relay;
+            // 릴레이 상태값 획득
+            readingStatusRegister[0] = modbus.getResponseBuffer(0);
+
+            // JSON 문서 크기 설정 (적절한 크기로 조정 필요)
+            // const size_t capacity =
+            //     JSON_OBJECT_SIZE(2)         // 최상위 객체 크기
+            //     + JSON_ARRAY_SIZE(5)        // sensors 배열
+            //     + JSON_OBJECT_SIZE(2) * 5   // sensors 배열의 객체들
+            //     + JSON_ARRAY_SIZE(16)       // relay 배열
+            //     + JSON_OBJECT_SIZE(2) * 16; // relay 배열의 객체들
+            // DynamicJsonDocument doc(capacity); // 872U
+            StaticJsonDocument<1024> doc;
+
+            // Sensors 배열 생성
+            JsonArray sensors = doc.createNestedArray("sensors");
+
+            // 예제: 센서 데이터 추가
+            // for (int i = 0; i < 3; i++)
+            // { // 센서 개수만큼 반복
+            //   JsonObject sensor = sensors.createNestedObject();
+            //   sensor["ecode"] = i + 1;  // 센서 ID
+            //   sensor["val"] = 17.3 + i; // 임의 값
+            // }
+
+            // 온습도 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
+            {
+              JsonObject sensor_temp = sensors.createNestedObject();
+              sensor_temp["ecode"] = 1;  // 온도/1
+              sensor_temp["val"] = temp; // 임의 값
+
+              JsonObject sensor_humi = sensors.createNestedObject();
+              sensor_humi["ecode"] = 2;  // 습도/2
+              sensor_humi["val"] = humi; // 임의 값
+            }
+
+            // TM100 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_tm100" || sensorId_02 == "sensorId_tm100")
+            {
+              JsonObject sensor_temp = sensors.createNestedObject();
+              sensor_temp["ecode"] = 1;  // 온도/1
+              sensor_temp["val"] = temp; // 임의 값
+
+              JsonObject sensor_humi = sensors.createNestedObject();
+              sensor_humi["ecode"] = 2;  // 습도/2
+              sensor_humi["val"] = humi; // 임의 값
+            }
+
+            // 감우 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_rain" || sensorId_02 == "sensorId_rain")
+            {
+              JsonObject sensor_rain = sensors.createNestedObject();
+              sensor_rain["ecode"] = 4;     // 감우/4
+              sensor_rain["val"] = isRainy; // 임의 값
+            }
+
+            // 지온·지습·EC 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_ec" || sensorId_02 == "sensorId_ec")
+            {
+              JsonObject sensor_ec = sensors.createNestedObject();
+              sensor_ec["ecode"] = 12; // EC/12
+              sensor_ec["val"] = ec;   // 임의 값
+
+              JsonObject sensor_soilTemp = sensors.createNestedObject();
+              sensor_soilTemp["ecode"] = 17;     // 지온/17
+              sensor_soilTemp["val"] = soilTemp; // 임의 값
+
+              JsonObject sensor_soilHumi = sensors.createNestedObject();
+              sensor_soilHumi["ecode"] = 14;     // 지습/14
+              sensor_soilHumi["val"] = soilHumi; // 임의 값
+            }
+
+            // 수분장력 센서 JsonPayload 구성
+            if (sensorId_01 == "sensorId_soil" || sensorId_02 == "sensorId_soil")
+            {
+              JsonObject sensor_soilPotential = sensors.createNestedObject();
+              sensor_soilPotential["ecode"] = 15;          // 수분장력/15
+              sensor_soilPotential["val"] = soilPotential; // 임의 값
+            }
+
+            // Relay 상태값
+            uint16_t relayState = readingStatusRegister[0];
+
+            // 예제: 릴레이 데이터 추가
+            // for (int i = 0; i < 2; i++)
+            // { // 릴레이 개수만큼 반복
+            //   JsonObject relayObj = relay.createNestedObject();
+            //   relayObj["num"] = i + 1;        // 릴레이 번호
+            //   relayObj["val"] = (i % 2 == 0); // 임의로 true/false 설정
+            // }
+
+            if (relayId == "relayId_4ch")
+            {
+              int relayChannels = 4;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+            else if (relayId == "relayId_8ch")
+            {
+              int relayChannels = 8;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+            else if (relayId == "relayId_16ch")
+            {
+              int relayChannels = 16;
+              createRelayJson(doc, relayChannels, relayState);
+            }
+
+            // JSON 페이로드 출력
+            String jsonPayload;
+            serializeJson(doc, jsonPayload);
+
+            DebugSerial.print("[Debug Point 03] relayState: ");
+            DebugSerial.println(relayState);
+            printBinary8(relayState);
+            // DebugSerial.println("Debugging jsonPayload:");
+            // DebugSerial.println(jsonPayload);
+
+            // String의 메모리 비효율성을 개선한 코드
+            char pubMsg[PUBLISH_MSG_SIZE];
+            int offset = 0; // 현재 버퍼의 위치 관리
+            int written;    // snprintf 반환값 저장
+
+            // 큐에 전달할 데이터 구성: {topic}${jsonPayload}${ModbusResult}$$[{Time_ESP}]
+            // [0]: Topic
+            // [1]: Payload
+            // [2]: Modbus Result
+            // [3]: Schedule Time
+            // [4]: Current Time
+
+            // [0], [1] 발행 토픽과 페이로드, 구분자 추가: {topic}${jsonPayload}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
+                               "%s%s%s$%s$",
+                               PUB_TOPIC, DEVICE_TOPIC, "/restate",
+                               jsonPayload.c_str());
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [2] Modbus Result 추가: {ModbusResult}$$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "%d$$", modbus_Relay_result);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [3] 스케줄 시간 정보 없음
+
+            // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]", timeBuffer);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+          else // 실패 시
+          {
+            DebugSerial.println("[Debug Point 04] Modbus State Failed.");
+
+            // 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+            DebugSerial.print("Modbus Relay Result: ");
+            DebugSerial.println(modbus_Relay_result);
           }
+        } // if (receivedData.rStr[0] == "state")
+
+        // (r1~r16) 일반적인 릴레이 제어 작업 (확장 주소 사용)
+        else
+        {
+          uint16_t selector_relay = BIT_SELECT << receivedData.index_relay; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+
+          if (strstr(receivedData.payloadBuffer.c_str(), "on")) // 메시지에 'on' 포함 시
+          {
+            // rStr[1].toInt() == 0 : 단순 on/off
+            if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+            {
+              localWritingRegisters_Expand[1] = selector_relay;
+              localWritingRegisters_Expand[2] = BIT_ON << receivedData.index_relay;
+            }
+            else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+            {
+              localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
+            }
+          }
+          else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
+          {
+            // rStr[1].toInt() == 0 : 단순 on/off
+            if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+            {
+              localWritingRegisters_Expand[1] = selector_relay;
+              localWritingRegisters_Expand[2] = BIT_OFF << receivedData.index_relay;
+            }
+            else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+            {
+              localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
+            }
+          }
+
+          // Write Buffer: No Delay
+          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
+          {
+            if (modbus.setTransmitBuffer(0x00, localWritingRegisters_Expand[0]) == 0) // Expand Write Status Group
+            {
+              // testMsg1 = "ok";
+            }
+            if (modbus.setTransmitBuffer(0x01, localWritingRegisters_Expand[1]) == 0) // Expand Write Relay Mask
+            {
+              // testMsg2 = "ok";
+            }
+            if (modbus.setTransmitBuffer(0x02, localWritingRegisters_Expand[2]) == 0) // Expand Write Relay
+            {
+              // testMsg3 = "ok";
+            }
+
+            // Write Relay: No Delay
+            modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
+          } // if No Delay
+
           else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
           {
-            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_ON; // 명시적 OR
-          }
-        }
-        else if (strstr(receivedData.payloadBuffer.c_str(), "off")) // 메시지에 'off' 포함 시
-        {
-          // rStr[1].toInt() == 0 : 단순 on/off
-          if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
-          {
-            localWritingRegisters_Expand[1] = selector_relay;
-            localWritingRegisters_Expand[2] = BIT_OFF << receivedData.index_relay;
-          }
-          else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
-          {
-            localWritingRegisters[2] = receivedData.index_relay << 1 | BIT_OFF; // 명시적 OR
-          }
-        }
+            // Write Buffer: Delay
+            if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
+            {
+              // testMsg1 = "ok";
+            }
+            if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
+            {
+              // testMsg2 = "ok";
+            }
+            if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
+            {
+              // testMsg3 = "ok";
+            }
+            if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
+            {
+              // testMsg4 = "ok";
+            }
 
-        // Write Buffer: No Delay
-        if (localWritingRegisters[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
-        {
-          if (modbus.setTransmitBuffer(0x00, localWritingRegisters_Expand[0]) == 0) // Expand Write Status Group
+            // Write Relay: Delay
+            modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
+          } // if Delay
+
+          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
           {
-            // testMsg1 = "ok";
-          }
-          if (modbus.setTransmitBuffer(0x01, localWritingRegisters_Expand[1]) == 0) // Expand Write Relay Mask
+            // DebugSerial.println("MODBUS Writing done.");
+
+            // String의 메모리 비효율성을 개선한 코드
+            char pubMsg[PUBLISH_MSG_SIZE_MIN];
+            int offset = 0; // 현재 버퍼의 위치 관리
+            int written;    // snprintf 반환값 저장
+
+            // 큐에 전달할 데이터 구성: {topic}${num&on}${ModbusResult}$$[{Time_ESP}]
+            // [0]: Topic
+            // [1]: Payload
+            // [2]: Modbus Result
+            // [3]: Schedule Time
+            // [4]: Current Time
+
+            // [0] 발행 토픽과 구분자 추가: {topic}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                               "%s%s%s$",
+                               PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // suffix "/r00" 에서 substring으로 10의 자리, 1의 자리 추출
+            if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
+            {
+              // [1]-1 릴레이 번호 10의 자리 추가: {num
+              written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                                 "%s",
+                                 receivedData.suffix.substring(2, 3));
+              if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+              {
+                DebugSerial.println("Error: Buffer overflow during Payload(num: 10 digits) creation!");
+                return; // 실패 처리
+              }
+              offset += written;
+            }
+
+            // [1]-2 릴레이 번호 1의 자리 및 on/off 정보 추가: {num&on}$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                               "%s&%s$",
+                               receivedData.suffix.substring(3), receivedData.rStr[0]);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Payload(num: 1 digits) creation!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [2] Modbus Result 추가: {ModbusResult}$$
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset, "%d$$", modbus_Relay_result);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            // [3] 스케줄 시간 정보 없음
+
+            // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset, "[%s]", timeBuffer);
+            if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+            {
+              DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+              return; // 실패 처리
+            }
+            offset += written;
+
+            enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+          else // 실패 시
           {
-            // testMsg2 = "ok";
-          }
-          if (modbus.setTransmitBuffer(0x02, localWritingRegisters_Expand[2]) == 0) // Expand Write Relay
-          {
-            // testMsg3 = "ok";
-          }
+            DebugSerial.println("[Debug Point 05] Modbus Relay Failed.");
 
-          // Write Relay: No Delay
-          modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
-          // DebugSerial.print("modbus_Relay_result: ");
-          // DebugSerial.println(modbus_Relay_result);
+            // 실제 동작 시간 정보 포함: [{Time_ESP}]
+            memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+            strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+            DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
 
-        } // if No Delay
-        else if (localWritingRegisters[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
-        {
-          // Write Buffer: Delay
-          if (modbus.setTransmitBuffer(0x00, localWritingRegisters[0]) == 0) // Write Type
-          {
-            // testMsg1 = "ok";
-          }
-          if (modbus.setTransmitBuffer(0x01, localWritingRegisters[1]) == 0) // Write PW
-          {
-            // testMsg2 = "ok";
-          }
-          if (modbus.setTransmitBuffer(0x02, localWritingRegisters[2]) == 0) // Write Relay
-          {
-            // testMsg3 = "ok";
-          }
-          if (modbus.setTransmitBuffer(0x03, localWritingRegisters[3]) == 0) // Write Time
-          {
-            // testMsg4 = "ok";
+            DebugSerial.print("Modbus Relay Result: ");
+            DebugSerial.println(modbus_Relay_result);
           }
 
-          // Write Relay: Delay
-          modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-          // DebugSerial.print("modbus_Relay_result: ");
-          // DebugSerial.println(modbus_Relay_result);
-        }
+          // printBinary16(writingRegisters[2]);
+        } // else (r1~r16) 일반적인 릴레이 제어 작업 (확장 주소 사용)
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
-        {
-          // DebugSerial.println("MODBUS Writing done.");
-          // testMsg5 = "ok";
+        // SerialPort 사용 종료
+        xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
 
-          // 큐에 전달할 데이터 구성: {topic}$1&on
-          String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC; // topic(수동)
-          pubMsg += "$";                                           // 구분자
-
-          // suffix "/r00" 에서 substring으로 십의 자리, 일의 자리 추출
-          if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
-          {
-            pubMsg += receivedData.suffix.substring(2, 3); // 십의 자리 append
-          }
-          pubMsg += receivedData.suffix.substring(3); // 일의 자리 append
-          pubMsg += "&";                              // 릴레이 번호와 페이로드 구분자
-          pubMsg += receivedData.rStr[0];             // 수신된 페이로드 중 on/off 반송
-
-          pubMsg += "$";
-          pubMsg += modbus_Relay_result;
-
-          enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-        }
-        else // [미구현] 실패 시 에러코드 보내나?
-        {
-          testBit = modbus_Relay_result;
-        }
-
-        // printBinary16(writingRegisters[2]);
-      }
+      } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
     } // if (xQueueReceive(modbusQueue, &receivedData, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
-// pppos client task보다 우선하는 modbus task
+// pppos client task보다 우선하는 modbus task - 16ch Relay Control: Auto(Schedule)
 void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Relay_result = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 1
-  modbus.begin(slaveId_relay, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -863,157 +1413,202 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
     // 스케줄 작업에 의한 릴레이 제어
     if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS) // TimeTask_ESP_Update_Time에서 큐 등록 시
     {
-      uint8_t index_relay_Schedule = data.num - 1;                           // [스케줄 제어용] num: 1~; index: 0~
-      uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+      if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
+      {
+        // Semaphore 허용 시
 
-      // 릴레이 제어 작업 (확장 주소 사용)
-      if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
-      {
-        writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
-        writingRegisters_Schedule[3] = 0;
-      }
-      else if (data.delay > 0)
-      {
-        writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
-        writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
-      }
+        /* Serial1 Initialization */
+        // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+        // Modbus slave ID 1
+        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      if (data.value == true) // ON 동작이면
-      {
-        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+        // 이하 Modbus 작업 수행
+        uint8_t index_relay_Schedule = data.num - 1;                           // [스케줄 제어용] num: 1~; index: 0~
+        uint16_t selector_relay_Schedule = BIT_SELECT << index_relay_Schedule; // 선택비트: 주소 0x0008 16비트 전체 사용, 인덱스만큼 shift와 같다.
+
+        // 릴레이 제어 작업 (확장 주소 사용)
+        if (data.delay == 0) // 딜레이 시간값 0: 단순 on/off
         {
-          writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
-          writingRegisters_Expand_Schedule[2] = BIT_ON << index_relay_Schedule;
+          writingRegisters_Schedule[0] = TYPE_1_WRITE_ON_OFF; // 타입1: 단순 on/off
+          writingRegisters_Schedule[3] = 0;
         }
+        else if (data.delay > 0)
+        {
+          writingRegisters_Schedule[0] = TYPE_2_WRITE_WITH_DELAY; // 타입2: Write with Delay
+          writingRegisters_Schedule[3] = data.delay;              // 딜레이할 시간값 대입
+        }
+
+        if (data.value == true) // ON 동작이면
+        {
+          if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          {
+            writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
+            writingRegisters_Expand_Schedule[2] = BIT_ON << index_relay_Schedule;
+          }
+          else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          {
+            writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
+          }
+        }
+        else if (data.value == false) // OFF 동작이면
+        {
+          if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          {
+            writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
+            writingRegisters_Expand_Schedule[2] = BIT_OFF << index_relay_Schedule;
+          }
+          else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          {
+            writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
+          }
+        }
+
+        // Write Buffer: No Delay
+        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
+        {
+          if (modbus.setTransmitBuffer(0x00, writingRegisters_Expand_Schedule[0]) == 0) // Expand Write Status Group
+          {
+            // testMsg1 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x01, writingRegisters_Expand_Schedule[1]) == 0) // Expand Write Relay Mask
+          {
+            // testMsg2 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x02, writingRegisters_Expand_Schedule[2]) == 0) // Expand Write Relay
+          {
+            // testMsg3 = "ok";
+          }
+
+          // Write Relay: No Delay
+          modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
+        } // if No Delay
+
         else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
         {
-          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_ON; // 명시적 OR
-        }
-      }
-      else if (data.value == false) // OFF 동작이면
-      {
-        if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // (Delay 기능 위한)단순 구분용
+          // Write Buffer: Delay
+          if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
+          {
+            // testMsg1 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
+          {
+            // testMsg2 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
+          {
+            // testMsg3 = "ok";
+          }
+          if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
+          {
+            // testMsg4 = "ok";
+          }
+
+          // Write Relay: Delay
+          modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
+        } // if Delay
+
+        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
         {
-          writingRegisters_Expand_Schedule[1] = selector_relay_Schedule;
-          writingRegisters_Expand_Schedule[2] = BIT_OFF << index_relay_Schedule;
-        }
-        else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
+          // DebugSerial.println("MODBUS Writing done.");
+
+          // String의 메모리 비효율성을 개선한 코드
+          char pubMsg[PUBLISH_MSG_SIZE];
+          int offset = 0; // 현재 버퍼의 위치 관리
+          int written;    // snprintf 반환값 저장
+
+          // 큐에 전달할 데이터 구성: {topic}${1&on&10}${ModbusResult}$[{Time_Schedule}]$[{Time_ESP}]
+          // [0]: Topic
+          // [1]: Payload
+          // [2]: Modbus Result
+          // [3]: Schedule Time
+          // [4]: Current Time
+
+          // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
+                             "%s%s%s%s$%d&%s&%d$",
+                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
+                             data.num, data.value ? "on" : "off", data.delay);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Schedule_Topic&Payload creation!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          // [2] Modbus Result 추가: {ModbusResult}$
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "%d$", modbus_Relay_result);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Modbus_Result addition!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          // [3] 스케줄 시간 정보 포함: [{Time_Schedule}]$
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]$", timeBuffer);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Scheduled_Time string addition!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset, "[%s]", timeBuffer);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+        } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+
+        else // 실패 시
         {
-          writingRegisters_Schedule[2] = index_relay_Schedule << 1 | BIT_OFF; // 명시적 OR
-        }
-      }
+          DebugSerial.println("[Debug Point 06] Modbus Schedule Failed.");
 
-      // Write Buffer: No Delay
-      if (writingRegisters_Schedule[0] == TYPE_1_WRITE_ON_OFF) // 단순 on/off일 때
-      {
-        if (modbus.setTransmitBuffer(0x00, writingRegisters_Expand_Schedule[0]) == 0) // Expand Write Status Group
-        {
-          // testMsg1 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x01, writingRegisters_Expand_Schedule[1]) == 0) // Expand Write Relay Mask
-        {
-          // testMsg2 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x02, writingRegisters_Expand_Schedule[2]) == 0) // Expand Write Relay
-        {
-          // testMsg3 = "ok";
+          // 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          DebugSerial.println("[CURRENT TIME] " + String(timeBuffer));
+
+          // 스케줄 동작 시간 정보 포함: [{Time_Schedule}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
+          DebugSerial.println("[SCHEDULED TIME] " + String(timeBuffer));
+
+          DebugSerial.print("Modbus Relay Result: ");
+          DebugSerial.println(modbus_Relay_result); // modbus Result
         }
 
-        // Write Relay: No Delay
-        modbus_Relay_result = modbus.writeMultipleRegisters(EXPAND_WRITE_START_ADDRESS, EXPAND_WRITE_QUANTITY);
+        // SerialPort 사용 종료
+        xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
 
-      } // if No Delay
-      else if (writingRegisters_Schedule[0] == TYPE_2_WRITE_WITH_DELAY) // Write with Delay
-      {
-        // Write Buffer: Delay
-        if (modbus.setTransmitBuffer(0x00, writingRegisters_Schedule[0]) == 0) // Write Type
-        {
-          // testMsg1 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x01, writingRegisters_Schedule[1]) == 0) // Write PW
-        {
-          // testMsg2 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x02, writingRegisters_Schedule[2]) == 0) // Write Relay
-        {
-          // testMsg3 = "ok";
-        }
-        if (modbus.setTransmitBuffer(0x03, writingRegisters_Schedule[3]) == 0) // Write Time
-        {
-          // testMsg4 = "ok";
-        }
-
-        // Write Relay: Delay
-        modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
-      }
-
-      if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
-      {
-        // DebugSerial.println("MODBUS Writing done.");
-        // testMsg5 = "ok";
-
-        // 스케줄 작업에 대한 topic/payload 구성해 publish 큐 사용하기
-        // 큐에 전달할 데이터 구성: {topic}$1&on&10
-        String pubMsg = PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "sh"; // 스케줄 topic(updatesh)
-        pubMsg += "$";                                                  // 구분자
-        // String tempZero = "r";
-        // if (data.num < 10) // 1~9 일때 공백 0 채우기
-        // {
-        //   tempZero += "0";
-        // }
-        // pubMsg += tempZero + data.num; // 릴레이 토픽 "r00" 구성
-        pubMsg += data.num;
-        pubMsg += "&";                       // 릴레이 번호와 페이로드 구분자
-        pubMsg += data.value ? "on" : "off"; // 0, 1정수형으로 해석; on&10 형식으로 구성
-        pubMsg += "&";
-        pubMsg += data.delay;
-
-        pubMsg += "$";
-        pubMsg += modbus_Relay_result;
-
-        strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
-
-        pubMsg += "$";
-        pubMsg += "[" + String(timeBuffer) + "]";
-
-        enqueue_MqttMsg(pubMsg.c_str()); // 큐에 데이터 전송
-      }
-      else // [미구현] 실패 시 에러코드 보내나?
-      {
-        // testBit = modbus_Relay_result;
-      }
-      // // [DEBUG LOG] 시간 형식 문자열을 timeBuffer에 저장
-      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &data.timeInfo);
-      // snprintf(logMsg, LOG_MSG_SIZE, "%s %s Relay{%02d} {%s}&{%d} [RESULT]: %d", SCHEDULE_TAG, timeBuffer, data.num, data.value ? "on" : "off", data.delay, modbus_Relay_result);
-      // enqueue_log(logMsg);
-
+      } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
     } // if (xQueueReceive(scheduleQueue, &data, portMAX_DELAY) == pdPASS)
 
-    vTaskDelay(200 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
 // 온습도 센서(THT-02) task
 void ModbusTask_Sensor_th(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Sensor_result_th = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 4(기기 자체 물리적 커스텀 가능)
-  modbus.begin(slaveId_th, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -1039,34 +1634,47 @@ void ModbusTask_Sensor_th(void *pvParameters)
 
   do
   {
-    int retryCount = 0;
-    const int maxRetries = 5;                               // 최대 재시도 횟수
-    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
-
-    // THT-02
-    while (modbus_Sensor_result_th != modbus.ku8MBSuccess && retryCount < maxRetries)
+    if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
     {
-      retryCount++;
-      vTaskDelay(retryDelay);                                      // 재시도 전에 500ms 대기
-      modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03, 재시도
-    }
+      // Semaphore 허용 시
 
-    if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
-    {
-      temp = float(modbus.getResponseBuffer(0) / 10.00F);
-      humi = float(modbus.getResponseBuffer(1) / 10.00F);
+      /* Serial1 Initialization */
+      // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+      // Modbus slave ID 4(기기 자체 물리적 커스텀 가능)
+      modbus.begin(slaveId_th, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      allowsPublishTEMP = true;
-      allowsPublishHUMI = true;
-      publishSensorData();
-    }
-    // 오류 처리
-    else
-    {
-      allowsPublishSensor_result_th = true;
-      publishModbusSensorResult();
-    }
-    modbus_Sensor_result_th = 77; // 초기화
+      // 이하 Modbus 작업 수행
+      int retryCount = 0;
+      const int maxRetries = 5;                               // 최대 재시도 횟수
+      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
+      // THT-02
+      while (modbus_Sensor_result_th != modbus.ku8MBSuccess && retryCount < maxRetries)
+      {
+        modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
+        retryCount++;
+        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      }
+
+      if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
+      {
+        temp = float(modbus.getResponseBuffer(0) / 10.00F);
+        humi = float(modbus.getResponseBuffer(1) / 10.00F);
+
+        allowsPublishTEMP = true;
+        allowsPublishHUMI = true;
+        publishSensorData();
+      }
+      else // 오류 처리
+      {
+        allowsPublishSensor_result_th = true;
+        publishModbusSensorResult();
+      }
+      modbus_Sensor_result_th = 77; // 초기화
+
+      // SerialPort 사용 종료
+      xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+    } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
@@ -1075,24 +1683,16 @@ void ModbusTask_Sensor_th(void *pvParameters)
 // 온습도 센서(TM-100) task
 void ModbusTask_Sensor_tm100(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Sensor_result_tm100 = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 10
-  modbus.begin(slaveId_tm100, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -1118,35 +1718,48 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
 
   do
   {
-    int retryCount = 0;
-    const int maxRetries = 5;                               // 최대 재시도 횟수
-    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
-
-    // TM-100
-    while (modbus_Sensor_result_tm100 != modbus.ku8MBSuccess && retryCount < maxRetries)
+    if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
     {
-      retryCount++;
-      vTaskDelay(retryDelay);                                       // 재시도 전에 500ms 대기
-      modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04, 재시도
-    }
+      // Semaphore 허용 시
 
-    if (modbus_Sensor_result_tm100 == modbus.ku8MBSuccess)
-    {
-      temp = float(modbus.getResponseBuffer(0) / 10.00F);
-      humi = float(modbus.getResponseBuffer(1) / 10.00F);
-      errBit = modbus.getResponseBuffer(2);
+      /* Serial1 Initialization */
+      // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+      // Modbus slave ID 10
+      modbus.begin(slaveId_tm100, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      allowsPublishTEMP = true;
-      allowsPublishHUMI = true;
-      publishSensorData();
-    }
-    // 오류 처리
-    else
-    {
-      allowsPublishSensor_result_tm100 = true;
-      publishModbusSensorResult();
-    }
-    modbus_Sensor_result_tm100 = 77; // 초기화
+      // 이하 Modbus 작업 수행
+      int retryCount = 0;
+      const int maxRetries = 5;                               // 최대 재시도 횟수
+      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
+      // TM-100
+      while (modbus_Sensor_result_tm100 != modbus.ku8MBSuccess && retryCount < maxRetries)
+      {
+        modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
+        retryCount++;
+        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      }
+
+      if (modbus_Sensor_result_tm100 == modbus.ku8MBSuccess)
+      {
+        temp = float(modbus.getResponseBuffer(0) / 10.00F);
+        humi = float(modbus.getResponseBuffer(1) / 10.00F);
+        errBit = modbus.getResponseBuffer(2);
+
+        allowsPublishTEMP = true;
+        allowsPublishHUMI = true;
+        publishSensorData();
+      }
+      else // 오류 처리
+      {
+        allowsPublishSensor_result_tm100 = true;
+        publishModbusSensorResult();
+      }
+      modbus_Sensor_result_tm100 = 77; // 초기화
+
+      // SerialPort 사용 종료
+      xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+    } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
@@ -1155,24 +1768,16 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
 // 감우 센서 task
 void ModbusTask_Sensor_rain(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Sensor_result_rain = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 2
-  modbus.begin(slaveId_rain, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -1198,51 +1803,64 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 
   do
   {
-    int retryCount = 0;
-    const int maxRetries = 5;                               // 최대 재시도 횟수
-    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
-
-    // CNT-WJ24
-    while (modbus_Sensor_result_rain != modbus.ku8MBSuccess && retryCount < maxRetries)
+    if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
     {
-      retryCount++;
-      vTaskDelay(retryDelay);                                         // 재시도 전에 500ms 대기
-      modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04, 재시도
-    }
+      // Semaphore 허용 시
 
-    if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
-    {
-      // 감우센서 온습도 훗날 사용?
-      float temp_CNT_WJ24 = float(modbus.getResponseBuffer(0) / 10.00F);
-      float humi_CNT_WJ24 = float(modbus.getResponseBuffer(1)); // 정수
+      /* Serial1 Initialization */
+      // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+      // Modbus slave ID 2
+      modbus.begin(slaveId_rain, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      int rainDetectBit = modbus.getResponseBuffer(2);
-      // 각 판의 비 감지 상태
-      bool plate1Detected = rainDetectBit & (1 << 7);
-      bool plate2Detected = rainDetectBit & (1 << 8);
-      bool plate3Detected = rainDetectBit & (1 << 9);
+      // 이하 Modbus 작업 수행
+      int retryCount = 0;
+      const int maxRetries = 5;                               // 최대 재시도 횟수
+      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-      // 최소 두 개의 감지판에서 비가 감지되는지 확인
-      int detectedCount = plate1Detected + plate2Detected + plate3Detected;
-      if (detectedCount >= 2)
+      // CNT-WJ24
+      while (modbus_Sensor_result_rain != modbus.ku8MBSuccess && retryCount < maxRetries)
       {
-        isRainy = true; // 비 감지됨
-      }
-      else
-      {
-        isRainy = false; // 비 미감지
+        modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
+        retryCount++;
+        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
       }
 
-      allowsPublishRAIN = true;
-      publishSensorData();
-    }
-    // 오류 처리
-    else
-    {
-      allowsPublishSensor_result_rain = true;
-      publishModbusSensorResult();
-    }
-    modbus_Sensor_result_rain = 77; // 초기화
+      if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
+      {
+        // 감우센서 온습도 훗날 사용?
+        float temp_CNT_WJ24 = float(modbus.getResponseBuffer(0) / 10.00F);
+        float humi_CNT_WJ24 = float(modbus.getResponseBuffer(1)); // 정수
+
+        int rainDetectBit = modbus.getResponseBuffer(2);
+        // 각 판의 비 감지 상태
+        bool plate1Detected = rainDetectBit & (1 << 7);
+        bool plate2Detected = rainDetectBit & (1 << 8);
+        bool plate3Detected = rainDetectBit & (1 << 9);
+
+        // 최소 두 개의 감지판에서 비가 감지되는지 확인
+        int detectedCount = plate1Detected + plate2Detected + plate3Detected;
+        if (detectedCount >= 2)
+        {
+          isRainy = true; // 비 감지됨
+        }
+        else
+        {
+          isRainy = false; // 비 미감지
+        }
+
+        allowsPublishRAIN = true;
+        publishSensorData();
+      }
+      else // 오류 처리
+      {
+        allowsPublishSensor_result_rain = true;
+        publishModbusSensorResult();
+      }
+      modbus_Sensor_result_rain = 77; // 초기화
+
+      // SerialPort 사용 종료
+      xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+    } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
@@ -1251,24 +1869,16 @@ void ModbusTask_Sensor_rain(void *pvParameters)
 // 지온·지습·EC 센서 task
 void ModbusTask_Sensor_ec(void *pvParameters)
 {
+  // Semaphore 생성 (최초 1회 실행)
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
+
   // HardwareSerial SerialPort(1); // use ESP32 UART1
   ModbusMaster modbus;
 
   modbus_Sensor_result_ec = modbus.ku8MBInvalidCRC;
-
-  // RS485 Setup
-  // RS485 제어 핀 초기화; modbus.begin() 이전 반드시 선언해 주어야!
-  pinMode(dePin, OUTPUT);
-  pinMode(rePin, OUTPUT);
-
-  // RE 및 DE를 비활성화 상태로 설정 (RE=LOW, DE=LOW)
-  digitalWrite(dePin, LOW);
-  digitalWrite(rePin, LOW);
-
-  /* Serial1 Initialization */
-  // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-  // Modbus slave ID 30
-  modbus.begin(slaveId_ec, SerialPort);
 
   // Callbacks allow us to configure the RS485 transceiver correctly
   // Auto FlowControl - NULL
@@ -1288,42 +1898,54 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 10 min
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
   do
   {
-    int retryCount = 0;
-    const int maxRetries = 5;                               // 최대 재시도 횟수
-    const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
-
-    // RK520-02
-    while (modbus_Sensor_result_ec != modbus.ku8MBSuccess && retryCount < maxRetries)
+    if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
     {
-      retryCount++;
-      vTaskDelay(retryDelay);                                      // 재시도 전에 500ms 대기
-      modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03, 재시도
-    }
+      // Semaphore 허용 시
 
-    if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
-    {
-      soilTemp = float(modbus.getResponseBuffer(0) / 10.00F);
-      soilHumi = float(modbus.getResponseBuffer(1) / 10.00F);
-      ec = float(modbus.getResponseBuffer(2) / 1000.00F);
+      /* Serial1 Initialization */
+      // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+      // Modbus slave ID 30
+      modbus.begin(slaveId_ec, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      allowsPublishSoilT = true;
-      allowsPublishSoilH = true;
-      allowsPublishEC = true;
-      publishSensorData();
-    }
-    // 오류 처리
-    else
-    {
-      allowsPublishSensor_result_ec = true;
-      publishModbusSensorResult();
-    }
-    modbus_Sensor_result_ec = 77; // 초기화
+      int retryCount = 0;
+      const int maxRetries = 5;                               // 최대 재시도 횟수
+      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+
+      // RK520-02
+      while (modbus_Sensor_result_ec != modbus.ku8MBSuccess && retryCount < maxRetries)
+      {
+        modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
+        retryCount++;
+        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      }
+
+      if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
+      {
+        soilTemp = float(modbus.getResponseBuffer(0) / 10.00F);
+        soilHumi = float(modbus.getResponseBuffer(1) / 10.00F);
+        ec = float(modbus.getResponseBuffer(2) / 1000.00F);
+
+        allowsPublishSoilT = true;
+        allowsPublishSoilH = true;
+        allowsPublishEC = true;
+        publishSensorData();
+      }
+      else // 오류 처리
+      {
+        allowsPublishSensor_result_ec = true;
+        publishModbusSensorResult();
+      }
+      modbus_Sensor_result_ec = 77; // 초기화
+
+      // SerialPort 사용 종료
+      xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+    } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
@@ -1341,7 +1963,7 @@ void TimeTask_NTPSync(void *pvParameters)
   char logMsg[LOG_MSG_SIZE];
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = 3600 * 24 * 7 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 7 Day
+  const TickType_t xWakePeriod = 3600 * 24 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 24 Hours
 
   vTaskDelay(2000 / portTICK_PERIOD_MS);
 
@@ -1612,6 +2234,12 @@ void postTransmission()
 void callback(char *topic, byte *payload, unsigned int length)
 {
   ModbusData modbusData;
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
+
+  // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+  memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+  strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+  DebugSerial.printf("[%s] ", timeBuffer);
 
   DebugSerial.print("Message arrived [");
   DebugSerial.print(topic);
@@ -1642,6 +2270,86 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.println(rStr[1]); // delayTime
   // DebugSerial.println(isNumeric(rStr[1]));
 
+  if (strstr(topic, "/state")) // 장치 상태 요청 토픽
+  {
+    // float temp = 0;          // 온도/1
+    // float humi = 0;          // 습도/2
+    // bool isRainy = false;    // 감우/4
+    // float ec = 0;            // EC/12
+    // float soilTemp = 0;      // 지온/17
+    // float soilHumi = 0;      // 지습/14
+    // float soilPotential = 0; // 수분장력/15
+    modbusData.rStr[0] = "state";
+    DebugSerial.println("[Debug Point 01] Alert Relay State");
+
+    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+    return;                                              // 조건 만족 시 더 이상 진행하지 않음
+  }
+
+  // 스케줄 기능 토픽
+  else if (strstr(topic, "/ResAddSch")) // 스케줄 추가 기능 수행
+  {
+    // 파싱-데이터저장-기능수행
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseMqttAndAddSchedule(jsonPart);
+    }
+    return; // 조건 만족 시 더 이상 진행하지 않음
+  }
+  else if (strstr(topic, "/ResUpdateSch")) // 스케줄 수정 기능 수행
+  {
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseAndUpdateSchedule(jsonPart);
+    }
+    return; // 조건 만족 시 더 이상 진행하지 않음
+  }
+  else if (strstr(topic, "/ResDelSch")) // 스케줄 삭제 기능 수행
+  {
+    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
+    if (jsonPart == NULL)
+    {
+      DebugSerial.println("Cannot find JSON data...");
+    }
+    else
+    {
+      parseAndDeleteSchedule(jsonPart);
+    }
+    return; // 조건 만족 시 더 이상 진행하지 않음
+  }
+
+  else if (strstr(topic, "/ReqHeatbit")) // 테스트 비트
+  {
+    char pubMsg[PUBLISH_MSG_SIZE_MIN];
+    int offset = 0; // 현재 버퍼의 위치 관리
+    int written;    // snprintf 반환값 저장
+
+    DebugSerial.println("[Debug Point 07] [TEST] ReqHeatbit");
+
+    written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
+                       "%s%s%s$%s",
+                       PUB_TOPIC, DEVICE_TOPIC, "/ResHeatbit", "ESP32");
+    if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+    {
+      DebugSerial.println("Error: Buffer overflow during Schedule_Topic creation!");
+      return; // 실패 처리
+    }
+    offset += written;
+
+    enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+    return;                  // 조건 만족 시 더 이상 진행하지 않음
+  }
+
   if (isNumeric(modbusData.rStr[1]))
   {
     if (modbusData.rStr[1].toInt() == 0) // 딜레이 시간값 0: 단순 on/off
@@ -1660,43 +2368,59 @@ void callback(char *topic, byte *payload, unsigned int length)
     // topic으로 한번 구분하고 (r1~)
     if (strstr(topic, "/r01")) // 릴레이 채널 1 (인덱스 0)
     {
-      modbusData.suffix = "/r01"; // 추가할 문자열을 설정
-      modbusData.index_relay = 0; // r1~r8: 0~7
+      modbusData.suffix = "/r01";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 0;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
     {
-      modbusData.suffix = "/r02"; // 추가할 문자열을 설정
-      modbusData.index_relay = 1; // r1~r8: 0~7
+      modbusData.suffix = "/r02";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 1;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
     {
-      modbusData.suffix = "/r03"; // 추가할 문자열을 설정
-      modbusData.index_relay = 2; // r1~r8: 0~7
+      modbusData.suffix = "/r03";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 2;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
     {
-      modbusData.suffix = "/r04"; // 추가할 문자열을 설정
-      modbusData.index_relay = 3; // r1~r8: 0~7
+      modbusData.suffix = "/r04";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 3;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
     {
-      modbusData.suffix = "/r05"; // 추가할 문자열을 설정
-      modbusData.index_relay = 4; // r1~r8: 0~7
+      modbusData.suffix = "/r05";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 4;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
     {
-      modbusData.suffix = "/r06"; // 추가할 문자열을 설정
-      modbusData.index_relay = 5; // r1~r8: 0~7
+      modbusData.suffix = "/r06";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 5;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
     {
-      modbusData.suffix = "/r07"; // 추가할 문자열을 설정
-      modbusData.index_relay = 6; // r1~r8: 0~7
+      modbusData.suffix = "/r07";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 6;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
     else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
     {
-      modbusData.suffix = "/r08"; // 추가할 문자열을 설정
-      modbusData.index_relay = 7; // r1~r8: 0~7
+      modbusData.suffix = "/r08";                          // 추가할 문자열을 설정
+      modbusData.index_relay = 7;                          // r1~r8: 0~7
+      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+      return;                                              // 조건 만족 시 더 이상 진행하지 않음
     }
 
     // 4, 8채널이 아닐 때 (16채널 이상)
@@ -1704,127 +2428,74 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       if (strstr(topic, "/r09")) // 릴레이 채널 9 (인덱스 8)
       {
-        modbusData.suffix = "/r09"; // 추가할 문자열을 설정
-        modbusData.index_relay = 8; // r1~r16: 0~15
+        modbusData.suffix = "/r09";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 8;                          // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r10")) // 릴레이 채널 10 (인덱스 9)
       {
-        modbusData.suffix = "/r10"; // 추가할 문자열을 설정
-        modbusData.index_relay = 9; // r1~r16: 0~15
+        modbusData.suffix = "/r10";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 9;                          // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r11")) // 릴레이 채널 11 (인덱스 10)
       {
-        modbusData.suffix = "/r11";  // 추가할 문자열을 설정
-        modbusData.index_relay = 10; // r1~r16: 0~15
+        modbusData.suffix = "/r11";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 10;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r12")) // 릴레이 채널 12 (인덱스 11)
       {
-        modbusData.suffix = "/r12";  // 추가할 문자열을 설정
-        modbusData.index_relay = 11; // r1~r16: 0~15
+        modbusData.suffix = "/r12";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 11;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r13")) // 릴레이 채널 13 (인덱스 12)
       {
-        modbusData.suffix = "/r13";  // 추가할 문자열을 설정
-        modbusData.index_relay = 12; // r1~r16: 0~15
+        modbusData.suffix = "/r13";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 12;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r14")) // 릴레이 채널 14 (인덱스 13)
       {
-        modbusData.suffix = "/r14";  // 추가할 문자열을 설정
-        modbusData.index_relay = 13; // r1~r16: 0~15
+        modbusData.suffix = "/r14";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 13;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r15")) // 릴레이 채널 15 (인덱스 14)
       {
-        modbusData.suffix = "/r15";  // 추가할 문자열을 설정
-        modbusData.index_relay = 14; // r1~r16: 0~15
+        modbusData.suffix = "/r15";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 14;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
       else if (strstr(topic, "/r16")) // 릴레이 채널 16 (인덱스 15)
       {
-        modbusData.suffix = "/r16";  // 추가할 문자열을 설정
-        modbusData.index_relay = 15; // r1~r16: 0~15
+        modbusData.suffix = "/r16";                          // 추가할 문자열을 설정
+        modbusData.index_relay = 15;                         // r1~r16: 0~15
+        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+        return;                                              // 조건 만족 시 더 이상 진행하지 않음
       }
     } // else if (relayId != "relayId_4ch" && relayId != "relayId_8ch")
 
-    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
   } // if (isNumeric(rStr[1]))
 
-  else if (modbusData.rStr[0] == "refresh")
-  {
-    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-    // task에서 발행하기
-  }
+  // else if (modbusData.rStr[0] == "refresh")
+  // {
+  //   xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
+  //   // task에서 발행하기
+  // }
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
   {
     DebugSerial.println("Payload arrived, But has invalid value: delayTime");
     // 아무것도 하지 않음
   }
-
-  if (strstr(topic, "/ResAddSch")) // 스케줄 추가 기능 수행
-  {
-    // 파싱-데이터저장-기능수행
-    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
-    if (jsonPart == NULL)
-    {
-      DebugSerial.println("Cannot find JSON data...");
-    }
-    else
-    {
-      parseMqttAndAddSchedule(jsonPart);
-    }
-  }
-  else if (strstr(topic, "/ResUpdateSch")) // 스케줄 수정 기능 수행
-  {
-    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
-    if (jsonPart == NULL)
-    {
-      DebugSerial.println("Cannot find JSON data...");
-    }
-    else
-    {
-      parseAndUpdateSchedule(jsonPart);
-    }
-  }
-  else if (strstr(topic, "/ResDelSch")) // 스케줄 삭제 기능 수행
-  {
-    const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
-    if (jsonPart == NULL)
-    {
-      DebugSerial.println("Cannot find JSON data...");
-    }
-    else
-    {
-      parseAndDeleteSchedule(jsonPart);
-    }
-  }
-
-  // 디버그 로그
-
-  // DebugSerial.print("readingStatusRegister: ");
-  // DebugSerial.println(readingStatusRegister[0]);
-  // DebugSerial.print("writingRegisters[2]: ");
-  // DebugSerial.println(modbusData.writingRegisters[2]);
-
-  // DebugSerial.print("writingRegisters_Expand[1]: ");
-  // DebugSerial.println(modbusData.writingRegisters_Expand[1]);
-  // DebugSerial.print("writingRegisters_Expand[2]: ");
-  // DebugSerial.println(modbusData.writingRegisters_Expand[2]);
-
-  // DebugSerial.println(testMsg1);
-  // DebugSerial.println(testMsg2);
-  // DebugSerial.println(testMsg3);
-  // DebugSerial.println(testMsg4);
-  // DebugSerial.println(testMsg5);
-
-  // DebugSerial.print("testBit: ");
-  // DebugSerial.println(testBit);
-
-  // 버퍼 초기화 및 메모리 해제
-  // testMsg1 = "";
-  // testMsg2 = "";
-  // testMsg3 = "";
-  // testMsg4 = "";
-  // testMsg5 = "";
-
-  // testBit = -1;
 }
 
 // PPPOS 연결 시작
@@ -2658,6 +3329,17 @@ void setup()
 
     /* Serial1 Initialization */
     SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
+
+    // FreeRTOS Mutex Semaphore 생성
+    xSerialSemaphore = xSemaphoreCreateMutex();
+    if (xSerialSemaphore == NULL)
+    {
+      DebugSerial.println("Failed to create xSerialSemaphore!");
+    }
+    else
+    {
+      DebugSerial.println("xSerialSemaphore created Successfully.");
+    }
 
     // Topic 관련 변수 초기화
     DEVICE_TOPIC = "/" + mqttUsername;
