@@ -156,6 +156,10 @@ public:
     // 모든 ScheduleDB 출력 (테스트용)
     void printAllSchedules()
     {
+        // 스케줄 개수 출력
+        Serial.print("Total Schedules: ");
+        Serial.println(scheduleList.size());
+
         Serial.println("All Schedules:");
         for (const auto &item : scheduleList)
         {
