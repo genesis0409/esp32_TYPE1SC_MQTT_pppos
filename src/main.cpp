@@ -91,6 +91,8 @@ const char *BROKER_PORTPath = "/BROKER_PORT.txt";
 String BROKER_ID;   // 수신된 Broker 주소 정보
 String BROKER_PORT; // 수신된 Broker Port 정보
 
+const char *ApnPath = "/Apn.txt"; // Set APN 코드 실행 여부 판단용
+
 // 릴레이, 센서코드 -> http 메시지로 전송할 정보
 String code_relay;
 String code_sen1;
@@ -182,7 +184,7 @@ bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만
 const char *ppp_user = "farmtalkSwitch";
 const char *ppp_pass = "farmtalk@123";
 
-String APN = "simplio.apn";
+char *apnAddr = "simplio.apn"; /* Vodafone Global IoT SIM APN */
 TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
 
 PPPOSClient ppposClient;
@@ -3154,6 +3156,70 @@ void setup()
   DebugSerial.println("init SPIFFS...");
   // File System Setup
   initSPIFFS();
+
+  // Set APN 코드 영역
+  String doesApnSet = readFile(SPIFFS, ApnPath);
+
+  // APN 설정 정보
+  DebugSerial.print("doesApnSet: ");
+  DebugSerial.println(doesApnSet);
+
+  // APN 파일이 비어있을 때 (APN 설정이 아직 안 된 상태)
+  while (doesApnSet == "")
+  {
+    DebugSerial.println("TYPE1SC Module Start!!!");
+
+    extAntenna();
+
+    /* TYPE1SC Module Initialization */
+    if (TYPE1SC.init())
+    {
+      DebugSerial.println("TYPE1SC Module Error!!!");
+    }
+
+    /* Network Disable */
+    if (TYPE1SC.setCFUN(0) == 0)
+    {
+      DebugSerial.println("TYPE1SC Network Disable!!!");
+    }
+
+    delay(1000);
+
+    if (TYPE1SC.setAPN(apnAddr) == 0)
+    {
+      DebugSerial.println("TYPE1SC Set APN Address!!!");
+    }
+
+    /* Board Reset */
+    TYPE1SC.reset();
+    delay(2000);
+
+    /* TYPE1SC Module Initialization */
+    if (TYPE1SC.init())
+    {
+      DebugSerial.println("TYPE1SC Module Error!!!");
+    }
+
+    DebugSerial.println("TYPE1SC Module Ready!!!");
+
+    char apn[128];
+    if (TYPE1SC.getAPN(apn, sizeof(apn)) == 0)
+    {
+      DebugSerial.print("GET APN Address: ");
+      DebugSerial.println(apn);
+
+      doesApnSet = apn;
+
+      // ESP32 Flash Memory에 기록
+      writeFile(SPIFFS, ApnPath, doesApnSet.c_str());
+
+      // 디버깅
+      DebugSerial.print("doesApnSet in ApnPath: ");
+      DebugSerial.println(readFile(SPIFFS, ApnPath));
+    }
+
+    DebugSerial.println("TYPE1SC APN Setup Complete!!!");
+  }
 
   // Load values saved in SPIFFS
   mqttUsername = readFile(SPIFFS, mqttUsernamePath);
