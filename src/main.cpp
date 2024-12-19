@@ -402,7 +402,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           // const int maxRetries = 3;                                // 최대 재시도 횟수
           // const TickType_t retryDelay = 1000 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-          // while ((modbus_Relay_result != modbus.ku8MBSuccess || modbus_Relay_result != modbus.ku8MBInvalidSlaveID) && retryCount < maxRetries)
+          // while (modbus_Relay_result != modbus.ku8MBSuccess && retryCount < maxRetries)
           // {
           //   retryCount++;
           //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
@@ -424,7 +424,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           DebugSerial.print("Modbus Relay Result: ");
           DebugSerial.println(modbus_Relay_result);
 
-          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+          if (modbus_Relay_result == modbus.ku8MBSuccess)
           {
             // 릴레이 상태값 획득
             readingStatusRegister[0] = modbus.getResponseBuffer(0);
@@ -590,7 +590,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             offset += written;
 
             enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+          } // if (modbus_Relay_result == 0)
 
           else // 실패 시
           {
@@ -655,7 +655,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
           // Write Relay
           modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
 
-          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+          if (modbus_Relay_result == modbus.ku8MBSuccess)
           {
             // DebugSerial.println("MODBUS Writing done.");
 
@@ -731,7 +731,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             offset += written;
 
             enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+          } // if (modbus_Relay_result == 0)
 
           else // 실패 시
           {
@@ -859,7 +859,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
         // Write Relay
         modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+        if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
           // DebugSerial.println("MODBUS Writing done.");
 
@@ -918,7 +918,7 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
           offset += written;
 
           enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-        } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+        } // if (modbus_Relay_result == 0)
 
         else // 실패 시
         {
@@ -1000,7 +1000,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           // const int maxRetries = 3;                                // 최대 재시도 횟수
           // const TickType_t retryDelay = 1000 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-          // while ((modbus_Relay_result != modbus.ku8MBSuccess || modbus_Relay_result != modbus.ku8MBInvalidSlaveID) && retryCount < maxRetries)
+          // while (modbus_Relay_result != modbus.ku8MBSuccess && retryCount < maxRetries)
           // {
           //   retryCount++;
           //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
@@ -1022,7 +1022,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
           DebugSerial.print("Modbus Relay Result: ");
           DebugSerial.println(modbus_Relay_result);
 
-          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+          if (modbus_Relay_result == modbus.ku8MBSuccess)
           {
             // 릴레이 상태값 획득
             readingStatusRegister[0] = modbus.getResponseBuffer(0);
@@ -1188,7 +1188,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             offset += written;
 
             enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+          } // if (modbus_Relay_result == 0)
 
           else // 실패 시
           {
@@ -1280,7 +1280,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
           } // if Delay
 
-          if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+          if (modbus_Relay_result == modbus.ku8MBSuccess)
           {
             // DebugSerial.println("MODBUS Writing done.");
 
@@ -1356,7 +1356,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             offset += written;
 
             enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-          } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+          } // if (modbus_Relay_result == 0)
 
           else // 실패 시
           {
@@ -1510,7 +1510,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
           modbus_Relay_result = modbus.writeMultipleRegisters(WRITE_START_ADDRESS, WRITE_QUANTITY);
         } // if Delay
 
-        if (modbus_Relay_result == modbus.ku8MBSuccess || modbus_Relay_result == modbus.ku8MBInvalidSlaveID)
+        if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
           // DebugSerial.println("MODBUS Writing done.");
 
@@ -1569,7 +1569,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
           offset += written;
 
           enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
-        } // if (modbus_Relay_result == 0 || modbus_Relay_result == 224)
+        } // if (modbus_Relay_result == 0)
 
         else // 실패 시
         {
