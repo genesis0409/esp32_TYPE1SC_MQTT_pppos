@@ -1930,9 +1930,22 @@ void ModbusTask_Sensor_ec(void *pvParameters)
 
       if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
       {
-        soilTemp = float(modbus.getResponseBuffer(0) / 10.00F);
-        soilHumi = float(modbus.getResponseBuffer(1) / 10.00F);
-        ec = float(modbus.getResponseBuffer(2) / 1000.00F);
+        uint16_t rawSoilTemp = modbus.getResponseBuffer(0); // 원본 데이터
+        uint16_t rawSoilHumi = modbus.getResponseBuffer(1); // 원본 데이터
+        uint16_t rawEC = modbus.getResponseBuffer(2);       // 원본 데이터
+
+        // 음수 변환 처리
+        if (rawSoilTemp >= 0x8000)
+        {
+          soilTemp = float((rawSoilTemp - 0xFFFF - 0x01) / 10.0F); // 계산식
+        }
+        else
+        {
+          soilTemp = float(rawSoilTemp / 10.0F);
+        }
+
+        soilHumi = float(rawSoilHumi / 10.0F);
+        ec = float(rawEC / 1000.0F);
 
         allowsPublishSoilT = true;
         allowsPublishSoilH = true;
