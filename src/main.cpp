@@ -134,13 +134,22 @@ void enqueue_log(const char *message); // 로그 메시지를 큐에 추가하�
 
 struct ScheduleData // ScheduleDB 멤버변수 중 릴레이 제어에 쓰일 변수
 {
-  int num;
-  bool value;
-  int delay;
+  int num;            // 릴레이 번호
+  bool value;         // 릴레이 동작값
+  int delay;          // 딜레이: 작동 시간
   struct tm timeInfo; // 스케줄 동작 시각 로그
 };
 QueueHandle_t scheduleQueue;   // ScheduleData 타입을 위한 Queue 생성; timeTask, ModbusTask에서 공유
 #define SCHEDULE_QUEUE_SIZE 30 // 큐 크기 설정
+
+struct CompletedScheduleData // 완료된 ScheduleData 매개 타입; ModbusScheduleTask에서 countScheduledDelayQueue로 전달해 TimeTask_Count_Scheduled_Delay에서 사용
+{
+  int num;    // 릴레이 번호
+  bool value; // 릴레이 동작값
+  int delay;  // 딜레이: 작동 시간
+};
+QueueHandle_t countScheduledDelayQueue;     // Schedule Task에서 완료된 스케줄 작업을 저장하기 위한 Queue 생성
+#define COUNT_SCHEDULED_DELAY_QUEUE_SIZE 30 // 큐 크기 설정
 
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
@@ -230,7 +239,7 @@ void publishSensorData();         // 센서값 발행
 void publishModbusSensorResult(); // 센서 modbus 오류 시 결과 발행
 
 QueueHandle_t publishQueue;      // 메시지 publish를 위한 Queue 생성; 릴레이 제어완료, 센서값 발행
-#define PUBLISH_QUEUE_SIZE 20    // 큐 크기 설정
+#define PUBLISH_QUEUE_SIZE 30    // 큐 크기 설정
 #define PUBLISH_MSG_SIZE_MIN 128 // 발행 메시지 크기 설정
 #define PUBLISH_MSG_SIZE 1024    // 발행 메시지 크기 설정
 
@@ -322,17 +331,18 @@ void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 mo
 void ModbusTask_Relay_16ch(void *pvParameters);          // Task에 등록할 modbus relay 제어
 void ModbusTask_Relay_8ch_Schedule(void *pvParameters);  // 스케줄에 의한 modbus relay 제어
 void ModbusTask_Relay_16ch_Schedule(void *pvParameters); // 스케줄에 의한 modbus relay 제어
-void ModbusTask_Sensor_th(void *pvParameters);           // 온습도 센서 task
-void ModbusTask_Sensor_tm100(void *pvParameters);        // TM100 task
-void ModbusTask_Sensor_rain(void *pvParameters);         // 감우 센서 task
-void ModbusTask_Sensor_ec(void *pvParameters);           // 지온·지습·EC 센서 task
-void ModbusTask_Sensor_soil(void *pvParameters);         // 수분장력 센서 task
+void ModbusTask_Sensor_th(void *pvParameters);           // 온습도 센서 Task
+void ModbusTask_Sensor_tm100(void *pvParameters);        // TM100 Task
+void ModbusTask_Sensor_rain(void *pvParameters);         // 감우 센서 Task
+void ModbusTask_Sensor_ec(void *pvParameters);           // 지온·지습·EC 센서 Task
+void ModbusTask_Sensor_soil(void *pvParameters);         // 수분장력 센서 Task
 
-void TimeTask_NTPSync(void *pvParameters);         // NTP 서버와 시간을 동기화하는 task
-void TimeTask_ESP_Update_Time(void *pvParameters); // ESP32 내부 타이머로 시간 업데이트하는 태스크
-void log_print_task(void *pvParameters);           // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
+void TimeTask_NTPSync(void *pvParameters);               // NTP 서버와 시간을 동기화하는 Task
+void TimeTask_ESP_Update_Time(void *pvParameters);       // ESP32 내부 타이머로 시간 업데이트하는 Task
+void TimeTask_Count_Scheduled_Delay(void *pvParameters); // ESP32 내부 타이머 활용해 스케줄 작업 완료 후 보고하는 Task
 
-void msg_publish_task(void *pvParameters); // 큐에서 메시지를 꺼내서 MQTT로 발행하는 태스크
+void log_print_task(void *pvParameters);   // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 Task
+void msg_publish_task(void *pvParameters); // 큐에서 메시지를 꺼내서 MQTT로 발행하는 Task
 
 // 각 센서별 Slave ID 고정 지정
 const int slaveId_relay = 1;
@@ -780,6 +790,8 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
 
   uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   ScheduleData data;
+  CompletedScheduleData completedData; // 완료된 스케줄 데이터를 저장할 구조체
+
   char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
   char logMsg[LOG_MSG_SIZE];
 
@@ -861,6 +873,24 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
+          // 스케줄 릴레이 동작이 끝났음을 알리는 기능 구현
+          // 1. 스케줄 동작 시 큐에 등록; 등록 정보: [relay_num, delay]
+          if (data.delay > 0) // 스케줄의 딜레이가 0초 초과일 때 스케줄 딜레이 카운트 로직 수행
+          {
+            completedData.num = data.num;
+            completedData.value = data.value;
+            completedData.delay = data.delay;
+
+            // countScheduledDelayQueue에 데이터 전송
+            if (xQueueSend(countScheduledDelayQueue, &completedData, portMAX_DELAY) != pdPASS)
+            {
+              DebugSerial.println("Failed to send Completed Schedule Data to Queue");
+            }
+            else // 성공 시
+            {
+            }
+          }
+
           // DebugSerial.println("MODBUS Writing done.");
 
           // String의 메모리 비효율성을 개선한 코드
@@ -1406,6 +1436,8 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
   uint16_t writingRegisters_Schedule[4] = {0, (const uint16_t)0, 0, 0};     // [스케줄 제어용] 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   uint16_t writingRegisters_Expand_Schedule[3] = {(const uint16_t)0, 0, 0}; // [스케줄 제어용] 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
   ScheduleData data;
+  CompletedScheduleData completedData; // 완료된 스케줄 데이터를 저장할 구조체
+
   char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
   char logMsg[LOG_MSG_SIZE];
 
@@ -1512,6 +1544,24 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 
         if (modbus_Relay_result == modbus.ku8MBSuccess)
         {
+          // 스케줄 릴레이 동작이 끝났음을 알리는 기능 구현
+          // 1. 스케줄 동작 시 큐에 등록; 등록 정보: [relay_num, delay]
+          if (data.delay > 0) // 스케줄의 딜레이가 0초 초과일 때 스케줄 딜레이 카운트 로직 수행
+          {
+            completedData.num = data.num;
+            completedData.value = data.value;
+            completedData.delay = data.delay;
+
+            // countScheduledDelayQueue에 데이터 전송
+            if (xQueueSend(countScheduledDelayQueue, &completedData, portMAX_DELAY) != pdPASS)
+            {
+              DebugSerial.println("Failed to send Completed Schedule Data to Queue");
+            }
+            else // 성공 시
+            {
+            }
+          }
+
           // DebugSerial.println("MODBUS Writing done.");
 
           // String의 메모리 비효율성을 개선한 코드
@@ -1969,7 +2019,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
 
 void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
 
-// NTP 서버와 시간을 동기화하는 태스크
+// NTP 서버와 시간을 동기화하는 Task
 void TimeTask_NTPSync(void *pvParameters)
 {
   struct tm timeInfo = {0};      // 시간 형식 구조체: 연, 월, 일, 시, 분, 초 등
@@ -2040,7 +2090,7 @@ void TimeTask_NTPSync(void *pvParameters)
   } while (true);
 }
 
-// ESP32 내부 타이머로 시간 업데이트하는 태스크
+// ESP32 내부 타이머로 시간 업데이트하는 Task
 void TimeTask_ESP_Update_Time(void *pvParameters)
 {
   char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
@@ -2142,20 +2192,150 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
           } // switch (schedule.getWMode())
 
         } // if (schedule.getEnable())
+
       } // for (auto &item : manager.getAllSchedules())
-
-      // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, asctime(&timeInfo));
-
-      // 시간 형식 문자열을 timeBuffer에 저장
-      // strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo);
-      // snprintf(logMsg, LOG_MSG_SIZE, "%s CURRENT TIME: %s", TIME_TAG_ESP, timeBuffer);
-      // enqueue_log(logMsg);
 
     } // if (isNTPtimeUpdated)
 
     // 주기마다 정확하게 대기
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
+}
+
+// ESP32 내부 타이머 활용해 스케줄 작업 완료 후 보고하는 Task
+void TimeTask_Count_Scheduled_Delay(void *pvParameters)
+{
+  CompletedScheduleData completedData; // 완료된 스케줄 데이터를 저장할 구조체
+
+  char timeBuffer[LOG_MSG_SIZE]; // 시간 형식을 저장할 임시 버퍼
+
+  // 딜레이 타이머를 관리하기 위한 구조체 배열 및 크기 정의
+  struct DelayTimer
+  {
+    int num;          // 릴레이 번호
+    bool value;       // 릴레이 on/off
+    int delay;        // 남은 시간
+    int delay_origin; // 남은 시간 원본(로그 용)
+    bool active;      // 타이머 활성 상태
+  };
+  DelayTimer delayTimers[COUNT_SCHEDULED_DELAY_QUEUE_SIZE] = {0}; // 최대 COUNT_SCHEDULED_DELAY_QUEUE_SIZE개의 타이머 관리
+
+  // 관리 변수 추가
+  int activeTimerCount = 0;  // 현재 활성화된 타이머 개수
+  int nextInactiveIndex = 0; // 다음 비활성화된 타이머 인덱스
+                             // 이를 사용하여 비활성화된 타이머를 효율적으로 찾음.
+                             // 새로운 데이터를 추가할 때 바로 다음 비활성화된 타이머 위치를 찾음.
+                             // 기존의 루프 기반 탐색 대신 빠른 인덱스 업데이트로 성능 개선.
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();                          // 현재 Tick 시간
+  const TickType_t xWakePeriod = 1 * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 1 sec
+
+  vTaskDelay(7000 / portTICK_PERIOD_MS);
+
+  while (true)
+  {
+    if (xQueueReceive(countScheduledDelayQueue, &completedData, 0) == pdPASS) // Schedule Task에서 큐 등록 시; 무기한 대기로 블로킹 주의
+    {
+      // 비활성화된 타이머를 추가
+      if (!delayTimers[nextInactiveIndex].active)
+      {
+        delayTimers[nextInactiveIndex].num = completedData.num;            // 릴레이 번호
+        delayTimers[nextInactiveIndex].value = completedData.value;        // 릴레이 on/off
+        delayTimers[nextInactiveIndex].delay = completedData.delay;        // 딜레이 설정
+        delayTimers[nextInactiveIndex].delay_origin = completedData.delay; // 딜레이 원본 저장
+        delayTimers[nextInactiveIndex].active = true;                      // 타이머 활성화
+        activeTimerCount++;                                                // 활성 타이머 개수 증가
+
+        // 다음 비활성화 타이머 인덱스 갱신
+        // 타이머가 활성 상태일 경우 다음 인덱스로 이동하며 비활성화된 타이머를 찾음.
+        // activeTimerCount가 큐 크기에 도달하면 더 이상 타이머를 활성화하지 않음.
+        do
+        {
+          nextInactiveIndex = (nextInactiveIndex + 1) % COUNT_SCHEDULED_DELAY_QUEUE_SIZE;
+        } while (delayTimers[nextInactiveIndex].active && activeTimerCount < COUNT_SCHEDULED_DELAY_QUEUE_SIZE);
+      }
+    }
+
+    // 타이머 업데이트
+    for (int i = 0; i < COUNT_SCHEDULED_DELAY_QUEUE_SIZE; i++)
+    {
+      if (delayTimers[i].active) // 순회하며 활성화된 각각의 타이머 카운트다운
+      {
+        delayTimers[i].delay--; // 딜레이 감소
+
+        // Debug Log
+        DebugSerial.print("delayTimers[i].num: ");
+        DebugSerial.println(delayTimers[i].num);
+        DebugSerial.print("delayTimers[i].delay: ");
+        DebugSerial.println(delayTimers[i].delay);
+
+        if (delayTimers[i].delay <= 0) // 타이머 완료
+        {
+          // String의 메모리 비효율성을 개선한 코드
+          char pubMsg[PUBLISH_MSG_SIZE];
+          int offset = 0; // 현재 버퍼의 위치 관리
+          int written;    // snprintf 반환값 저장
+
+          // 큐에 전달할 데이터 구성: {topic}${1&on&10&0}; 마지막은 완료됐음을 의미; 0: 결국 꺼짐, 1: 결국 켜짐
+          // [0]: Topic
+          // [1]: Payload
+          // [2]: Modbus Result
+          // [3]: Schedule Time
+          // [4]: Current Time
+
+          // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$$$
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
+                             "%s%s%s%s%s$%d&%s&%d&%d$$$",
+                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh", "Done",
+                             delayTimers[i].num, delayTimers[i].value ? "on" : "off", delayTimers[i].delay_origin, !delayTimers[i].value);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Schedule_Topic&Payload creation!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          // [2] Modbus Result 없음
+          // [3] 스케줄 시간 정보 없음
+
+          // [4] 실제 동작 시간 정보 포함: [{Time_ESP}]
+          memset(timeBuffer, 0, LOG_MSG_SIZE); // 버퍼 초기화
+          strftime(timeBuffer, LOG_MSG_SIZE, FORMAT_TIME, &timeInfo_ESP_Updated);
+          written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset, "[%s]", timeBuffer);
+          if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
+          {
+            DebugSerial.println("Error: Buffer overflow during Esp_Updated_Time string addition!");
+            return; // 실패 처리
+          }
+          offset += written;
+
+          enqueue_MqttMsg(pubMsg); // 큐에 데이터 전송
+
+          // delayTimers[i] = {0, false, 0, 0, false};
+          // 타이머 필드를 명시적으로 초기화
+          delayTimers[i].num = 0;
+          delayTimers[i].value = false;
+          delayTimers[i].delay = 0;
+          delayTimers[i].delay_origin = 0;
+          delayTimers[i].active = false;
+
+          activeTimerCount--; // 활성 타이머 개수 감소
+
+          // 비활성화된 타이머의 인덱스를 갱신
+          if (i < nextInactiveIndex)
+          {
+            nextInactiveIndex = i; // 비활성화된 가장 빠른 인덱스 설정
+          }
+
+        } // if (delayTimers[i].delay <= 0)
+
+      } // if (delayTimers[i].active)
+
+    } // for (int i = 0; i < COUNT_SCHEDULED_DELAY_QUEUE_SIZE; i++)
+
+    // 주기마다 정확하게 대기
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
+  } // while (true)
 }
 
 // 로그 메시지를 큐에 추가하는 함수
@@ -2167,7 +2347,7 @@ void enqueue_log(const char *message)
   }
 }
 
-// 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 태스크
+// 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 Task
 void log_print_task(void *pvParameters)
 {
   char logMsg[LOG_MSG_SIZE];
@@ -2193,7 +2373,7 @@ void enqueue_MqttMsg(const char *message)
   }
 }
 
-// 큐에서 메시지를 꺼내서 MQTT로 발행하는 태스크
+// 큐에서 메시지를 꺼내서 MQTT로 발행하는 Task
 void msg_publish_task(void *pvParameters)
 {
   char pubMsg[PUBLISH_MSG_SIZE];
@@ -4252,23 +4432,33 @@ void setup()
       DebugSerial.println("Failed to create schedule queue");
     }
 
-    // publishQueue 생성, 최대 20개의 publish 메시지를 보관할 수 있습니다.
+    // countScheduledDelayQueue 생성, 최대 30개의 CompletedScheduleData 항목을 보관할 수 있습니다.
+    countScheduledDelayQueue = xQueueCreate(COUNT_SCHEDULED_DELAY_QUEUE_SIZE, sizeof(CompletedScheduleData));
+    if (countScheduledDelayQueue == NULL)
+    {
+      DebugSerial.println("Failed to create countScheduledDelay queue");
+    }
+
+    // publishQueue 생성, 최대 30개의 publish 메시지를 보관할 수 있습니다.
     publishQueue = xQueueCreate(PUBLISH_QUEUE_SIZE, sizeof(char) * PUBLISH_MSG_SIZE);
     if (publishQueue == NULL)
     {
       DebugSerial.println("Failed to create publish queue");
     }
 
-    // NTP 동기화 태스크 생성
+    // NTP 동기화 Task 생성
     xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
-    // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 태스크 생성
+    // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 Task 생성
     xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 4096, NULL, 6, NULL);
 
-    // 로그 출력 태스크 생성 - [구현 요] 문제 발생: overflow 발생 하는 듯
+    // 내부 타이머 활용해 스케줄 작업 완료 후 보고하는 Task 생성
+    xTaskCreate(TimeTask_Count_Scheduled_Delay, "TimeTask_Count_Scheduled_Delay", 4096, NULL, 6, NULL);
+
+    // 로그 출력 Task 생성 - [구현 요] 문제 발생: overflow 발생 하는 듯
     xTaskCreate(log_print_task, "log_print_task", 4096, NULL, 4, NULL);
 
-    // 메시지 발행 태스크 생성
+    // 메시지 발행 Task 생성
     xTaskCreate(msg_publish_task, "msg_publish_task", 4096, NULL, 4, NULL);
 
     if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
