@@ -201,7 +201,7 @@ PubSubClient client(ppposClient);
 bool atMode = true;
 
 // Set SENSING_PERIOD *****************************************************************************
-#define SENSING_PERIOD_SEC 600 // 600s = 10 min
+#define SENSING_PERIOD_SEC 60 // 60s = 1 min
 #define PERIOD_CONSTANT 1000
 // ************************************************************************************************
 
@@ -1681,7 +1681,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -1765,7 +1765,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -1850,7 +1850,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
@@ -1951,7 +1951,7 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   // }
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; // 주기: [10 min]
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
 
   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
