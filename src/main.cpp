@@ -26,6 +26,9 @@ SemaphoreHandle_t xSerialSemaphore = NULL; // Modbus 작업이 동시에 실행�
                                            // 모든 Task는 xSerialSemaphore를 사용해 SerialPort 접근 권한을 요청합니다.
                                            // 하나의 Task가 SerialPort를 사용하는 동안 다른 Task는 대기합니다.
 
+#include <esp32-sdi12.h>
+#include "CRC.h"
+
 #include "ScheduleDB.h"
 #include "config.h"
 
@@ -309,7 +312,6 @@ uint8_t modbus_Sensor_result_th;
 uint8_t modbus_Sensor_result_tm100;
 uint8_t modbus_Sensor_result_rain;
 uint8_t modbus_Sensor_result_ec;
-uint8_t modbus_Sensor_result_soil;
 
 // void checkModbusErrorStatus();
 
@@ -325,6 +327,11 @@ struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
   uint8_t index_relay;    // r1~r8: 0~7
 };
 QueueHandle_t modbusQueue; // Task와 콜백 함수에서 데이터를 교환하기 위한 Queue를 생성
+
+// SDI-12
+const int sdi12DataPin = 27;
+const int deviceAddr = 0;
+ESP32_SDI12::Status sdi12_Sensor_result_soil;
 
 // 각 node task
 void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
@@ -1025,7 +1032,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
         // state 토픽일 경우 릴레이 상태 및 센서 상태 업데이트
         if (receivedData.rStr[0] == "state")
         {
-          // // 재시도 로직
+          // 재시도 로직
           // int retryCount = 0;
           // const int maxRetries = 3;                                // 최대 재시도 횟수
           // const TickType_t retryDelay = 1000 / portTICK_PERIOD_MS; // 500ms 재시도 간격
@@ -1649,7 +1656,7 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
   }
 }
 
-// 온습도 센서(THT-02) task
+// 온습도 센서(THT-02) Task
 void ModbusTask_Sensor_th(void *pvParameters)
 {
   // Semaphore 생성 (최초 1회 실행)
@@ -1733,7 +1740,7 @@ void ModbusTask_Sensor_th(void *pvParameters)
   } while (true);
 }
 
-// 온습도 센서(TM-100) task
+// 온습도 센서(TM-100) Task
 void ModbusTask_Sensor_tm100(void *pvParameters)
 {
   // Semaphore 생성 (최초 1회 실행)
@@ -1818,7 +1825,7 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
   } while (true);
 }
 
-// 감우 센서 task
+// 감우 센서 Task
 void ModbusTask_Sensor_rain(void *pvParameters)
 {
   // Semaphore 생성 (최초 1회 실행)
@@ -1919,7 +1926,7 @@ void ModbusTask_Sensor_rain(void *pvParameters)
   } while (true);
 }
 
-// 지온·지습·EC 센서 task
+// 지온·지습·EC 센서 Task
 void ModbusTask_Sensor_ec(void *pvParameters)
 {
   // Semaphore 생성 (최초 1회 실행)
@@ -2017,7 +2024,76 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   } while (true);
 }
 
-void ModbusTask_Sensor_soil(void *pvParameters) {} // 수분장력 센서 task
+// 수분장력 센서 Task
+void ModbusTask_Sensor_soil(void *pvParameters)
+{
+  // Modbus 사용하지 않으니 Semaphore 사용 안해도 무방할 듯
+  // Semaphore 생성 (최초 1회 실행)
+  // if (xSerialSemaphore == NULL)
+  // {
+  //   xSerialSemaphore = xSemaphoreCreateMutex();
+  // }
+
+  ESP32_SDI12 sdi12(sdi12DataPin); // sdi12 통신을 위한 객체
+
+  sdi12_Sensor_result_soil = ESP32_SDI12::SDI12_ERR;
+
+  // 센서가 추가될 때마다 10%의 지연
+  if (allows2ndSensorTaskDelay && sensorId_02 == "sensorId_soil")
+  {
+    vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 1); // 주기의 10% 지연
+  }
+
+  // n번째 센서 추가 대비용
+  // if (allows3rdSensorTaskDelay && sensorId_03 == "sensorId_soil")
+  // {
+  //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
+  // }
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
+
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+  do
+  {
+    float sdi12Values[10]; // 센서값: sdi12Values[0]
+    uint8_t numberOfReturnedValues;
+
+    // 센서값 획득
+    sdi12_Sensor_result_soil = sdi12.measure(deviceAddr, sdi12Values, sizeof(sdi12Values), &numberOfReturnedValues);
+
+    if (sdi12_Sensor_result_soil == ESP32_SDI12::SDI12_OK)
+    {
+      soilPotential = sdi12Values[0];
+
+      allowsPublishSoilP = true;
+      publishSensorData();
+
+      // Debug Log
+      DebugSerial.print("Soil Water Potential: -");
+      DebugSerial.print(soilPotential);
+      DebugSerial.println(" kPa");
+    }
+    else // 오류 처리
+    {
+      DebugSerial.printf("ESP32_SDI12 Error: %d\n", sdi12_Sensor_result_soil);
+      allowsPublishSensor_result_soil = true; // 통신에 오류있으면 보내지 않음
+      publishModbusSensorResult();
+    }
+    sdi12_Sensor_result_soil = ESP32_SDI12::SDI12_ERR; // 초기화
+
+    // Debug Log
+    DebugSerial.print("SDI12 Arrays: ");
+    for (int i = 0; i < sizeof(sdi12Values) / sizeof(sdi12Values[0]); i++)
+    {
+      DebugSerial.printf("%.3f ", sdi12Values[i]);
+    }
+    DebugSerial.println();
+
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
+  } while (true);
+}
 
 // NTP 서버와 시간을 동기화하는 Task
 void TimeTask_NTPSync(void *pvParameters)
@@ -2862,32 +2938,32 @@ void publishModbusSensorResult()
 {
   if (allowsPublishSensor_result_th)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/th").c_str(), ("th result: " + String(modbus_Sensor_result_th)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/th").c_str(), String(modbus_Sensor_result_th).c_str());
     DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
     allowsPublishSensor_result_th = false;
   }
   if (allowsPublishSensor_result_tm100)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/tm100").c_str(), ("tm100 result: " + String(modbus_Sensor_result_tm100)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/tm100").c_str(), String(modbus_Sensor_result_tm100).c_str());
     DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
     allowsPublishSensor_result_tm100 = false;
   }
   if (allowsPublishSensor_result_rain)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/rain").c_str(), ("rain result: " + String(modbus_Sensor_result_rain)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/rain").c_str(), String(modbus_Sensor_result_rain).c_str());
     DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
     allowsPublishSensor_result_rain = false;
   }
   if (allowsPublishSensor_result_ec)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/ec").c_str(), ("ec result: " + String(modbus_Sensor_result_ec)).c_str());
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/ec").c_str(), String(modbus_Sensor_result_ec).c_str());
     DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
     allowsPublishSensor_result_ec = false;
   }
   if (allowsPublishSensor_result_soil)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/ModbusSensorResult/soil").c_str(), ("soil result: " + String(modbus_Sensor_result_soil)).c_str());
-    DebugSerial.println("ModbusSensorError_soil result: " + String(modbus_Sensor_result_soil));
+    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/soil").c_str(), String(sdi12_Sensor_result_soil).c_str());
+    DebugSerial.println("SDI12SensorError_soil result: " + String(sdi12_Sensor_result_soil));
     allowsPublishSensor_result_soil = false;
   }
 }
@@ -4479,7 +4555,7 @@ void setup()
       xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
-    // 온습도 센서 task 생성 및 등록 (우선순위: 6)
+    // 온습도 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
     {
       if (sensorId_01 == "sensorId_th")
@@ -4498,7 +4574,7 @@ void setup()
       xTaskCreate(&ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
     }
 
-    // TM100 센서 task 생성 및 등록 (우선순위: 6)
+    // TM100 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_tm100" || sensorId_02 == "sensorId_tm100")
     {
       if (sensorId_01 == "sensorId_tm100")
@@ -4517,7 +4593,7 @@ void setup()
       xTaskCreate(&ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
     }
 
-    // 감우 센서 task 생성 및 등록 (우선순위: 6)
+    // 감우 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_rain" || sensorId_02 == "sensorId_rain")
     {
       if (sensorId_01 == "sensorId_rain")
@@ -4537,7 +4613,7 @@ void setup()
       xTaskCreate(&ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
     }
 
-    // 지온·지습·EC 센서 task 생성 및 등록 (우선순위: 6)
+    // 지온·지습·EC 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_ec" || sensorId_02 == "sensorId_ec")
     {
       if (sensorId_01 == "sensorId_ec")
@@ -4556,7 +4632,7 @@ void setup()
       xTaskCreate(&ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
     }
 
-    // 수분장력 센서 task 생성 및 등록 (우선순위: 6)
+    // 수분장력 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_soil" || sensorId_02 == "sensorId_soil")
     {
       if (sensorId_01 == "sensorId_soil")
