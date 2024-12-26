@@ -1704,17 +1704,19 @@ void ModbusTask_Sensor_th(void *pvParameters)
       modbus.begin(slaveId_th, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
       // 이하 Modbus 작업 수행
-      int retryCount = 0;
-      const int maxRetries = 5;                               // 최대 재시도 횟수
-      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+      // int retryCount = 0;
+      // const int maxRetries = 5;                               // 최대 재시도 횟수
+      // const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-      // THT-02
-      while (modbus_Sensor_result_th != modbus.ku8MBSuccess && retryCount < maxRetries)
-      {
-        modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
-        retryCount++;
-        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
-      }
+      // // THT-02
+      // while (modbus_Sensor_result_th != modbus.ku8MBSuccess && retryCount < maxRetries)
+      // {
+      //   modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
+      //   retryCount++;
+      //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      // }
+
+      modbus_Sensor_result_th = modbus.readHoldingRegisters(0, 2); // 0x03
 
       if (modbus_Sensor_result_th == modbus.ku8MBSuccess)
       {
@@ -1788,17 +1790,19 @@ void ModbusTask_Sensor_tm100(void *pvParameters)
       modbus.begin(slaveId_tm100, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
       // 이하 Modbus 작업 수행
-      int retryCount = 0;
-      const int maxRetries = 5;                               // 최대 재시도 횟수
-      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+      // int retryCount = 0;
+      // const int maxRetries = 5;                               // 최대 재시도 횟수
+      // const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-      // TM-100
-      while (modbus_Sensor_result_tm100 != modbus.ku8MBSuccess && retryCount < maxRetries)
-      {
-        modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
-        retryCount++;
-        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
-      }
+      // // TM-100
+      // while (modbus_Sensor_result_tm100 != modbus.ku8MBSuccess && retryCount < maxRetries)
+      // {
+      //   modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
+      //   retryCount++;
+      //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      // }
+
+      modbus_Sensor_result_tm100 = modbus.readInputRegisters(0, 3); // 0x04
 
       if (modbus_Sensor_result_tm100 == modbus.ku8MBSuccess)
       {
@@ -1873,17 +1877,19 @@ void ModbusTask_Sensor_rain(void *pvParameters)
       modbus.begin(slaveId_rain, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
       // 이하 Modbus 작업 수행
-      int retryCount = 0;
-      const int maxRetries = 5;                               // 최대 재시도 횟수
-      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+      // int retryCount = 0;
+      // const int maxRetries = 5;                               // 최대 재시도 횟수
+      // const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-      // CNT-WJ24
-      while (modbus_Sensor_result_rain != modbus.ku8MBSuccess && retryCount < maxRetries)
-      {
-        modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
-        retryCount++;
-        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
-      }
+      // // CNT-WJ24
+      // while (modbus_Sensor_result_rain != modbus.ku8MBSuccess && retryCount < maxRetries)
+      // {
+      //   modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
+      //   retryCount++;
+      //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      // }
+
+      modbus_Sensor_result_rain = modbus.readInputRegisters(0x64, 3); // 0x04
 
       if (modbus_Sensor_result_rain == modbus.ku8MBSuccess)
       {
@@ -1973,17 +1979,20 @@ void ModbusTask_Sensor_ec(void *pvParameters)
       // Modbus slave ID 30
       modbus.begin(slaveId_ec, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
-      int retryCount = 0;
-      const int maxRetries = 5;                               // 최대 재시도 횟수
-      const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
+      // 이하 Modbus 작업 수행
+      // int retryCount = 0;
+      // const int maxRetries = 5;                               // 최대 재시도 횟수
+      // const TickType_t retryDelay = 500 / portTICK_PERIOD_MS; // 500ms 재시도 간격
 
-      // RK520-02
-      while (modbus_Sensor_result_ec != modbus.ku8MBSuccess && retryCount < maxRetries)
-      {
-        modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
-        retryCount++;
-        vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
-      }
+      // // RK520-02
+      // while (modbus_Sensor_result_ec != modbus.ku8MBSuccess && retryCount < maxRetries)
+      // {
+      //   modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
+      //   retryCount++;
+      //   vTaskDelay(retryDelay); // 재시도 전에 500ms 대기
+      // }
+
+      modbus_Sensor_result_ec = modbus.readHoldingRegisters(0, 3); // 0x03
 
       if (modbus_Sensor_result_ec == modbus.ku8MBSuccess)
       {
