@@ -2063,7 +2063,7 @@ void SDI12Task_Sensor_soil(void *pvParameters)
       // Semaphore 허용 시
 
       sdi12.begin();
-      
+
       // 센서값 획득
       sdi12_Sensor_result_soil = sdi12.measure(deviceAddr, sdi12Values, sizeof(sdi12Values), &numberOfReturnedValues);
 
@@ -2350,10 +2350,10 @@ void TimeTask_Count_Scheduled_Delay(void *pvParameters)
         delayTimers[i].delay--; // 딜레이 감소
 
         // Debug Log
-        DebugSerial.print("delayTimers[i].num: ");
-        DebugSerial.println(delayTimers[i].num);
-        DebugSerial.print("delayTimers[i].delay: ");
-        DebugSerial.println(delayTimers[i].delay);
+        // DebugSerial.print("delayTimers[i].num: ");
+        // DebugSerial.println(delayTimers[i].num);
+        // DebugSerial.print("delayTimers[i].delay: ");
+        // DebugSerial.println(delayTimers[i].delay);
 
         if (delayTimers[i].delay <= 0) // 타이머 완료
         {
