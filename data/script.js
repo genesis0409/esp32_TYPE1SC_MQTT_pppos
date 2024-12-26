@@ -61,9 +61,9 @@ $(function () {
     $('#sensorId_01 option[id = "boundaryLine"]').prop("disabled", true);
     $('#sensorId_02 option[id = "boundaryLine"]').prop("disabled", true);
 
-    // // value가 'sensorId_soil'인 옵션(Teros 21)을 비활성화
-    // $('#sensorId_01 option[value="sensorId_soil"]').prop("disabled", true);
-    // $('#sensorId_02 option[value="sensorId_soil"]').prop("disabled", true);
+    // value가 'sensorId_soil'인 옵션(Teros 21)을 비활성화
+    $('#sensorId_01 option[value="sensorId_soil"]').prop("disabled", true);
+    $('#sensorId_02 option[value="sensorId_soil"]').prop("disabled", true);
 
     // 1번 선택항목이 있을 때, 2번의 동일한 선택항목을 비활성화
     if (selectedValue1) {

@@ -331,6 +331,7 @@ QueueHandle_t modbusQueue; // Task와 콜백 함수에서 데이터를 교환하
 // SDI-12
 const int sdi12DataPin = 27;
 const int deviceAddr = 0;
+ESP32_SDI12 sdi12(sdi12DataPin);
 ESP32_SDI12::Status sdi12_Sensor_result_soil;
 
 // 각 node task
@@ -342,7 +343,7 @@ void ModbusTask_Sensor_th(void *pvParameters);           // 온습도 센서 Tas
 void ModbusTask_Sensor_tm100(void *pvParameters);        // TM100 Task
 void ModbusTask_Sensor_rain(void *pvParameters);         // 감우 센서 Task
 void ModbusTask_Sensor_ec(void *pvParameters);           // 지온·지습·EC 센서 Task
-void ModbusTask_Sensor_soil(void *pvParameters);         // 수분장력 센서 Task
+void SDI12Task_Sensor_soil(void *pvParameters);          // 수분장력 센서 Task
 
 void TimeTask_NTPSync(void *pvParameters);               // NTP 서버와 시간을 동기화하는 Task
 void TimeTask_ESP_Update_Time(void *pvParameters);       // ESP32 내부 타이머로 시간 업데이트하는 Task
@@ -357,7 +358,6 @@ const int slaveId_th = 4;
 const int slaveId_tm100 = 10;
 const int slaveId_rain = 2;
 const int slaveId_ec = 30;
-const int slaveId_soil = 40;
 
 // Modbus Flow 함수
 void preTransmission();
@@ -2024,17 +2024,15 @@ void ModbusTask_Sensor_ec(void *pvParameters)
   } while (true);
 }
 
-// 수분장력 센서 Task
-void ModbusTask_Sensor_soil(void *pvParameters)
+// 수분장력 센서 Task - 미사용: Modbus와 충돌
+void SDI12Task_Sensor_soil(void *pvParameters)
 {
   // Modbus 사용하지 않으니 Semaphore 사용 안해도 무방할 듯
   // Semaphore 생성 (최초 1회 실행)
-  // if (xSerialSemaphore == NULL)
-  // {
-  //   xSerialSemaphore = xSemaphoreCreateMutex();
-  // }
-
-  ESP32_SDI12 sdi12(sdi12DataPin); // sdi12 통신을 위한 객체
+  if (xSerialSemaphore == NULL)
+  {
+    xSerialSemaphore = xSemaphoreCreateMutex();
+  }
 
   sdi12_Sensor_result_soil = ESP32_SDI12::SDI12_ERR;
 
@@ -2050,6 +2048,9 @@ void ModbusTask_Sensor_soil(void *pvParameters)
   //   vTaskDelay(SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS / 10 * 2); // 주기의 20% 지연
   // }
 
+  float sdi12Values[10]; // 센서값: sdi12Values[0]
+  uint8_t numberOfReturnedValues;
+
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = SENSING_PERIOD_SEC * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [1 min]
 
@@ -2057,39 +2058,48 @@ void ModbusTask_Sensor_soil(void *pvParameters)
 
   do
   {
-    float sdi12Values[10]; // 센서값: sdi12Values[0]
-    uint8_t numberOfReturnedValues;
-
-    // 센서값 획득
-    sdi12_Sensor_result_soil = sdi12.measure(deviceAddr, sdi12Values, sizeof(sdi12Values), &numberOfReturnedValues);
-
-    if (sdi12_Sensor_result_soil == ESP32_SDI12::SDI12_OK)
+    if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE) // Semaphore를 얻을 때까지 무기한 대기
     {
-      soilPotential = sdi12Values[0];
+      // Semaphore 허용 시
 
-      allowsPublishSoilP = true;
-      publishSensorData();
+      sdi12.begin();
+      
+      // 센서값 획득
+      sdi12_Sensor_result_soil = sdi12.measure(deviceAddr, sdi12Values, sizeof(sdi12Values), &numberOfReturnedValues);
+
+      if (sdi12_Sensor_result_soil == ESP32_SDI12::SDI12_OK)
+      {
+        soilPotential = sdi12Values[0];
+
+        allowsPublishSoilP = true;
+        publishSensorData();
+
+        // Debug Log
+        DebugSerial.print("Soil Water Potential: -");
+        DebugSerial.print(soilPotential);
+        DebugSerial.println(" kPa");
+      }
+      else // 오류 처리
+      {
+        DebugSerial.printf("ESP32_SDI12 Error: %d\n", sdi12_Sensor_result_soil);
+        allowsPublishSensor_result_soil = true; // 통신에 오류있으면 보내지 않음
+        publishModbusSensorResult();
+      }
+      sdi12_Sensor_result_soil = ESP32_SDI12::SDI12_ERR; // 초기화
 
       // Debug Log
-      DebugSerial.print("Soil Water Potential: -");
-      DebugSerial.print(soilPotential);
-      DebugSerial.println(" kPa");
-    }
-    else // 오류 처리
-    {
-      DebugSerial.printf("ESP32_SDI12 Error: %d\n", sdi12_Sensor_result_soil);
-      allowsPublishSensor_result_soil = true; // 통신에 오류있으면 보내지 않음
-      publishModbusSensorResult();
-    }
-    sdi12_Sensor_result_soil = ESP32_SDI12::SDI12_ERR; // 초기화
+      DebugSerial.print("SDI12 Arrays: ");
+      for (int i = 0; i < sizeof(sdi12Values) / sizeof(sdi12Values[0]); i++)
+      {
+        DebugSerial.printf("%.2f ", sdi12Values[i]);
 
-    // Debug Log
-    DebugSerial.print("SDI12 Arrays: ");
-    for (int i = 0; i < sizeof(sdi12Values) / sizeof(sdi12Values[0]); i++)
-    {
-      DebugSerial.printf("%.3f ", sdi12Values[i]);
-    }
-    DebugSerial.println();
+        sdi12Values[i] = 0; // 초기화
+      }
+      DebugSerial.println();
+
+      // SerialPort 사용 종료
+      xSemaphoreGive(xSerialSemaphore); // xSemaphoreTake와 xSemaphoreGive는 항상 쌍으로 사용
+    } // if (xSemaphoreTake(xSerialSemaphore, portMAX_DELAY) == pdTRUE)
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   } while (true);
@@ -4648,7 +4658,7 @@ void setup()
       // DebugSerial.print("slaveId_soil: ");
       // DebugSerial.println(slaveId_soil);
 
-      xTaskCreate(&ModbusTask_Sensor_soil, "Task_soil", 2048, NULL, 6, NULL);
+      xTaskCreate(&SDI12Task_Sensor_soil, "Task_soil", 4096, NULL, 6, NULL);
     }
   }
 }
