@@ -337,6 +337,9 @@ const int deviceAddr = 0;
 ESP32_SDI12 sdi12(sdi12DataPin);
 ESP32_SDI12::Status sdi12_Sensor_result_soil;
 
+// callback - 토픽 파싱해 릴레이 모듈과 릴레이 인덱스를 구분하고 데이터를 구성해 큐로 보내는 함수
+void process_FTV_Topic(String topic_module, String topic_index, ModbusData modbusData);
+
 // 각 node task
 void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
 void ModbusTask_Relay_16ch(void *pvParameters);          // Task에 등록할 modbus relay 제어
@@ -371,6 +374,49 @@ String testMsg1 = "";
 String testMsg2 = "";
 String testMsg3 = "";
 String testMsg4 = "";
+
+// callback - 토픽 파싱해 릴레이 모듈과 릴레이 인덱스를 구분하고 데이터를 구성해 큐로 보내는 함수
+void process_FTV_Topic(String topic_module, String topic_index, ModbusData modbusData)
+{
+  int mIndex = 0; // 모듈 인덱스 (릴레이 Modbus ID)
+  int rIndex = 0; // 릴레이 인덱스
+
+  // 문자열이 유효한 숫자인지 입력값 검사
+  if (topic_module.length() == 2 && isDigit(topic_module[0]) && isDigit(topic_module[1]))
+  {
+    mIndex = topic_module.toInt();
+  }
+  else
+  {
+    DebugSerial.print("topic_module ERROR: ");
+    DebugSerial.println(topic_module);
+  }
+
+  if (topic_index.length() == 2 && isDigit(topic_index[0]) && isDigit(topic_index[1]))
+  {
+    rIndex = topic_index.toInt();
+  }
+  else
+  {
+    DebugSerial.print("topic_index ERROR: ");
+    DebugSerial.println(topic_index);
+  }
+
+  if (rIndex >= 1 && rIndex <= 32) // 최대 32채널 릴레이, html과 modbus task 32채널용 확장 개발 병행 요
+  {
+    // modbusData 설정
+    modbusData.slaveId_current_module = mIndex; // 모듈 인덱스: 릴레이 Modbus ID
+    modbusData.suffix = "/r" + rIndex;          // "/r01" 등 릴레이 토픽 부분
+    modbusData.index_relay = rIndex - 1;        // 0부터 시작하는 인덱스
+
+    xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송
+  }
+  else
+  {
+    DebugSerial.print("rIndex ERROR: ");
+    DebugSerial.println(rIndex);
+  }
+}
 
 // pppos client task보다 우선하는 modbus task - 8ch Relay Control: Manual
 void ModbusTask_Relay_8ch(void *pvParameters)
@@ -2559,8 +2605,21 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
   DebugSerial.println();
 
+  // 메시지 스플릿 - 토픽 파싱
+  // type1sc/FTV/{ID}/control/00/00
+
+  // topicStr[0]: type1sc
+  // topicStr[1]: FTSW/FTV 구분
+  // topicStr[2]: userID
+  // topicStr[3]: 제어 토픽 ('control')
+  // topicStr[4]: 모듈 ID, /state, /ResAddSch, /ResUpdateSch, /ResDelSch, /ReqHeatbit
+  // topicStr[5]: 릴레이 인덱스
+
+  int cnt_topic = 0; // Split()으로 분할된 문자열의 개수
+  String *topicStr = Split(topic, '/', &cnt_topic);
+
   // 메시지 스플릿 - 페이로드 파싱
-  // p가 가리키는 값을 payloadBuffer에 복사
+  // payload가 가리키는 값을 payloadBuffer에 복사
   for (unsigned int i = 0; i < length; i++)
   {
     modbusData.payloadBuffer += (char)payload[i]; // payloadBuffer - Split 파싱에 사용
@@ -2568,8 +2627,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.print("payloadBuffer: ");
   // DebugSerial.println(modbusData.payloadBuffer);
 
-  int cnt = 0; // Split()으로 분할된 문자열의 개수
-  modbusData.rStr = Split(modbusData.payloadBuffer, '&', &cnt);
+  int cnt_payload = 0; // Split()으로 분할된 문자열의 개수
+  modbusData.rStr = Split(modbusData.payloadBuffer, '&', &cnt_payload);
 
   // DebugSerial.print("rStr[0]: ");
   // DebugSerial.println(rStr[0]); // on/off
@@ -2577,7 +2636,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.println(rStr[1]); // delayTime
   // DebugSerial.println(isNumeric(rStr[1]));
 
-  if (strstr(topic, "/state")) // 장치 상태 요청 토픽
+  if (topicStr[4] == "/state") // 장치 상태 요청 토픽
   {
     // float temp = 0;          // 온도/1
     // float humi = 0;          // 습도/2
@@ -2594,7 +2653,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
 
   // 스케줄 기능 토픽
-  else if (strstr(topic, "/ResAddSch")) // 스케줄 추가 기능 수행
+  else if (topicStr[4] == "/ResAddSch") // 스케줄 추가 기능 수행
   {
     // 파싱-데이터저장-기능수행
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
@@ -2608,7 +2667,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
-  else if (strstr(topic, "/ResUpdateSch")) // 스케줄 수정 기능 수행
+  else if (topicStr[4] == "/ResUpdateSch") // 스케줄 수정 기능 수행
   {
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
@@ -2621,7 +2680,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
-  else if (strstr(topic, "/ResDelSch")) // 스케줄 삭제 기능 수행
+  else if (topicStr[4] == "/ResDelSch") // 스케줄 삭제 기능 수행
   {
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
@@ -2635,7 +2694,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
 
-  else if (strstr(topic, "/ReqHeatbit")) // 테스트 비트
+  else if (topicStr[4] == "/ReqHeatbit") // 테스트 비트
   {
     char pubMsg[PUBLISH_MSG_SIZE_MIN];
     int offset = 0; // 현재 버퍼의 위치 관리
@@ -2671,133 +2730,10 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
 
     // 릴레이 조작(컨트롤) 로직 ******************************************************************************************
-
-    // topic으로 한번 구분하고 (r1~)
-    if (strstr(topic, "/r01")) // 릴레이 채널 1 (인덱스 0)
-    {
-      modbusData.suffix = "/r01";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 0;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r02")) // 릴레이 채널 2 (인덱스 1)
-    {
-      modbusData.suffix = "/r02";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 1;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r03")) // 릴레이 채널 3 (인덱스 2)
-    {
-      modbusData.suffix = "/r03";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 2;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r04")) // 릴레이 채널 4 (인덱스 3)
-    {
-      modbusData.suffix = "/r04";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 3;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r05")) // 릴레이 채널 5 (인덱스 4)
-    {
-      modbusData.suffix = "/r05";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 4;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r06")) // 릴레이 채널 6 (인덱스 5)
-    {
-      modbusData.suffix = "/r06";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 5;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r07")) // 릴레이 채널 7 (인덱스 6)
-    {
-      modbusData.suffix = "/r07";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 6;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-    else if (strstr(topic, "/r08")) // 릴레이 채널 8 (인덱스 7)
-    {
-      modbusData.suffix = "/r08";                          // 추가할 문자열을 설정
-      modbusData.index_relay = 7;                          // r1~r8: 0~7
-      xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-      return;                                              // 조건 만족 시 더 이상 진행하지 않음
-    }
-
-    // 4, 8채널이 아닐 때 (16채널 이상)
-    else if (relayId != "relayId_4ch" && relayId != "relayId_8ch")
-    {
-      if (strstr(topic, "/r09")) // 릴레이 채널 9 (인덱스 8)
-      {
-        modbusData.suffix = "/r09";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 8;                          // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r10")) // 릴레이 채널 10 (인덱스 9)
-      {
-        modbusData.suffix = "/r10";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 9;                          // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r11")) // 릴레이 채널 11 (인덱스 10)
-      {
-        modbusData.suffix = "/r11";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 10;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r12")) // 릴레이 채널 12 (인덱스 11)
-      {
-        modbusData.suffix = "/r12";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 11;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r13")) // 릴레이 채널 13 (인덱스 12)
-      {
-        modbusData.suffix = "/r13";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 12;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r14")) // 릴레이 채널 14 (인덱스 13)
-      {
-        modbusData.suffix = "/r14";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 13;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r15")) // 릴레이 채널 15 (인덱스 14)
-      {
-        modbusData.suffix = "/r15";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 14;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-      else if (strstr(topic, "/r16")) // 릴레이 채널 16 (인덱스 15)
-      {
-        modbusData.suffix = "/r16";                          // 추가할 문자열을 설정
-        modbusData.index_relay = 15;                         // r1~r16: 0~15
-        xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-        return;                                              // 조건 만족 시 더 이상 진행하지 않음
-      }
-    } // else if (relayId != "relayId_4ch" && relayId != "relayId_8ch")
+    process_FTV_Topic(topicStr[4], topicStr[5], modbusData); // 토픽으로 RS485 릴레이 모듈 ID 및 릴레이 인덱스 결정
 
   } // if (isNumeric(rStr[1]))
 
-  // else if (modbusData.rStr[0] == "refresh")
-  // {
-  //   xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송 > task에서 사용
-  //   // task에서 발행하기
-  // }
   else // 잘못된 메시지로 오면 (delay시간값에 문자라거나)
   {
     DebugSerial.println("Payload arrived, But has invalid value: delayTime");
@@ -2839,11 +2775,11 @@ void reconnect()
     {
       DebugSerial.println("MQTT connected");
 
-      client.subscribe((SUB_TOPIC + DEVICE_TOPIC + CONTROL_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
+      client.subscribe((SUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + CONTROL_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
 
       // Once connected, publish an announcement...
-      client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), (mqttUsername + " Ready.").c_str()); // 준비되었음을 알림(publish)
-                                                                                                             // ... and resubscribe
+      client.publish((PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), ("FTV " + mqttUsername + " Ready.").c_str()); // 준비되었음을 알림(publish)
+                                                                                                                                  // ... and resubscribe
     }
     else // 실패 시 재연결 시도
     {
@@ -2862,7 +2798,7 @@ void publishSensorData()
   // 온도
   if (allowsPublishTEMP)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/1").c_str(), String(temp).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/1").c_str(), String(temp).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/1");
@@ -2876,7 +2812,7 @@ void publishSensorData()
   // 습도
   if (allowsPublishHUMI)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/2").c_str(), String(humi).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/2").c_str(), String(humi).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/2");
@@ -2890,7 +2826,7 @@ void publishSensorData()
   // 감우
   if (allowsPublishRAIN)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/4").c_str(), String(isRainy ? 1 : 0).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/4").c_str(), String(isRainy ? 1 : 0).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/4");
@@ -2903,7 +2839,7 @@ void publishSensorData()
   // EC
   if (allowsPublishEC)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/12").c_str(), String(ec).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/12").c_str(), String(ec).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/12");
@@ -2917,7 +2853,7 @@ void publishSensorData()
   // 지온
   if (allowsPublishSoilT)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/17").c_str(), String(soilTemp).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/17").c_str(), String(soilTemp).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/17");
@@ -2930,7 +2866,7 @@ void publishSensorData()
   // 지습
   if (allowsPublishSoilH)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/14").c_str(), String(soilHumi).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/14").c_str(), String(soilHumi).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/14");
@@ -2944,7 +2880,7 @@ void publishSensorData()
   // 수분장력
   if (allowsPublishSoilP)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/15").c_str(), String(soilPotential).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/15").c_str(), String(soilPotential).c_str());
 
     // DebugSerial.print("Publish: [");
     // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/15");
@@ -2960,31 +2896,31 @@ void publishModbusSensorResult()
 {
   if (allowsPublishSensor_result_th)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/th").c_str(), String(modbus_Sensor_result_th).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/th").c_str(), String(modbus_Sensor_result_th).c_str());
     DebugSerial.println("ModbusSensorError_th result: " + String(modbus_Sensor_result_th));
     allowsPublishSensor_result_th = false;
   }
   if (allowsPublishSensor_result_tm100)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/tm100").c_str(), String(modbus_Sensor_result_tm100).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/tm100").c_str(), String(modbus_Sensor_result_tm100).c_str());
     DebugSerial.println("ModbusSensorError_tm100 result: " + String(modbus_Sensor_result_tm100));
     allowsPublishSensor_result_tm100 = false;
   }
   if (allowsPublishSensor_result_rain)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/rain").c_str(), String(modbus_Sensor_result_rain).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/rain").c_str(), String(modbus_Sensor_result_rain).c_str());
     DebugSerial.println("ModbusSensorError_rain result: " + String(modbus_Sensor_result_rain));
     allowsPublishSensor_result_rain = false;
   }
   if (allowsPublishSensor_result_ec)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/ec").c_str(), String(modbus_Sensor_result_ec).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/ec").c_str(), String(modbus_Sensor_result_ec).c_str());
     DebugSerial.println("ModbusSensorError_ec result: " + String(modbus_Sensor_result_ec));
     allowsPublishSensor_result_ec = false;
   }
   if (allowsPublishSensor_result_soil)
   {
-    client.publish((PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/soil").c_str(), String(sdi12_Sensor_result_soil).c_str());
+    client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/SensorResult/soil").c_str(), String(sdi12_Sensor_result_soil).c_str());
     DebugSerial.println("SDI12SensorError_soil result: " + String(sdi12_Sensor_result_soil));
     allowsPublishSensor_result_soil = false;
   }
