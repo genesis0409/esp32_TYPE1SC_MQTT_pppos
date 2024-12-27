@@ -3118,7 +3118,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 bool isWMConfigDefined()
 {
   // if (mqttUsername == "" || mqttPw == "" || hostId == "" || port == "" || relayId == "" || slaveId_relay == "")
-  if (mqttUsername == "" || mqttPw == "" || relayId == "")
+  if (mqttUsername == "" || mqttPw == "" || numberOfValves == "")
   {
     DebugSerial.println("Undefined Form Submitted...");
     return false;
@@ -3496,7 +3496,7 @@ void setup()
     // Connect to Wi-Fi network with SSID and pass
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("Daon-FarmtalkSwitch-Manager", NULL);
+    WiFi.softAP("Daon-FarmtalkValve-Manager", NULL);
 
     IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
     Serial.print("AP IP address: ");
@@ -3832,7 +3832,7 @@ void setup()
       String data = "GET /api/Auth/Create?";
       data += "id=" + mqttUsername + "&";
       data += "pwd=" + mqttPw + "&";
-      data += "relay=" + code_relay + "&"; // 릴레이 wifi manager 입력값 바탕으로 구분
+      data += "relay=" + numberOfValves + "&"; // 릴레이 wifi manager 입력값 바탕으로 구분
       data += "sen1=" + code_sen1 + "&";
       data += "sen2=" + code_sen2;
 
@@ -3978,6 +3978,7 @@ void setup()
         // SPIFFS.remove(relayIdPath);
         // SPIFFS.remove(BROKER_IDPath);
         // SPIFFS.remove(BROKER_PORTPath);
+        // SPIFFS.remove(numberOfValvesPath);
 
         // DebugSerial.println("Factory Reset Complete.");
 
@@ -4216,6 +4217,7 @@ void setup()
         // SPIFFS.remove(relayIdPath);
         // SPIFFS.remove(BROKER_IDPath);
         // SPIFFS.remove(BROKER_PORTPath);
+        // SPIFFS.remove(numberOfValvesPath);
 
         // DebugSerial.println("Factory Reset Complete.");
 
@@ -4228,139 +4230,141 @@ void setup()
 
     httpRecvOK = false; // http 메시지 수신 여부 초기화
 
-    if (farmtalkServerLoginResult == 0) // 로그인 성공 시 스케줄 정보 수신 및 저장
-    {
-      DebugSerial.print("[ALERT] Download Schedule Info Process...");
+    // 241227 FTV는 스케줄 작업 없음
+    //     if (farmtalkServerLoginResult == 0) // 로그인 성공 시 스케줄 정보 수신 및 저장
+    //     {
+    //       DebugSerial.print("[ALERT] Download Schedule Info Process...");
 
-      int schedulePages = (scount + 4) / 5; // 올림 처리를 위한 계산: (11+4)=15 /3 -> 3페이지
-      DebugSerial.print(" schedulePages: ");
-      DebugSerial.println(schedulePages);
+    //       int schedulePages = (scount + 4) / 5; // 올림 처리를 위한 계산: (11+4)=15 /3 -> 3페이지
+    //       DebugSerial.print(" schedulePages: ");
+    //       DebugSerial.println(schedulePages);
 
-      for (int i = 0; i < schedulePages; i++) // 페이지 수 만큼 HTTP 요청
-      {
-        httpRecvOK = false; // http 메시지 수신 여부 초기화
+    //       for (int i = 0; i < schedulePages; i++) // 페이지 수 만큼 HTTP 요청
+    //       {
+    //         httpRecvOK = false; // http 메시지 수신 여부 초기화
 
-        // Use TCP Socket
-        /********************************/
-        String data = "GET /api/Auth/GetSchedulePage?";
-        data += "id=" + mqttUsername + "&";
-        data += "page=" + String(i);
+    //         // Use TCP Socket
+    //         /********************************/
+    //         String data = "GET /api/Auth/GetSchedulePage?";
+    //         data += "id=" + mqttUsername + "&";
+    //         data += "page=" + String(i);
 
-        data += " HTTP/1.1\r\n";
-        data += "Host: " + String(IPAddr) + "\r\n";
-        data += "Connection: keep-alive\r\n\r\n";
+    //         data += " HTTP/1.1\r\n";
+    //         data += "Host: " + String(IPAddr) + "\r\n";
+    //         data += "Connection: keep-alive\r\n\r\n";
 
-        // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
-        // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
-        // String data = "http://gh.farmtalk.kr:5038/api/Auth/GetSchedulePage?id=daon&page={0~n}";
+    //         // String data = "http://gh.farmtalk.kr:5038/api/Auth/Create?id=daon&pwd=1234&relay=4&sen1=0&sen2=0";
+    //         // String data = "http://gh.farmtalk.kr:5038/api/Auth/Login?id=daon&pass=1234";
+    //         // String data = "http://gh.farmtalk.kr:5038/api/Auth/GetSchedulePage?id=daon&page={0~n}";
 
-        // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
-        while (!httpRecvOK && httpTryCount++ < httpTryLimit)
-        {
-          /* 3-1 :TCP Socket Send Data */
-          if (TYPE1SC.socketSend(data.c_str()) == 0)
-          {
-            DebugSerial.print("[HTTP Send] >> ");
-            DebugSerial.println(data);
-#if defined(USE_LCD)
-            u8x8log.print("[HTTP Send] >> ");
-            u8x8log.print(data);
-            u8x8log.print("\n");
-#endif
-          }
-          else
-          {
-            DebugSerial.println("Send Fail!!!");
-#if defined(USE_LCD)
-            u8x8log.print("Send Fail!!!\n");
-#endif
-          }
+    //         // http 수신 성공적이면 타지 않음; 3회 시도; 실패하면?
+    //         while (!httpRecvOK && httpTryCount++ < httpTryLimit)
+    //         {
+    //           /* 3-1 :TCP Socket Send Data */
+    //           if (TYPE1SC.socketSend(data.c_str()) == 0)
+    //           {
+    //             DebugSerial.print("[HTTP Send] >> ");
+    //             DebugSerial.println(data);
+    // #if defined(USE_LCD)
+    //             u8x8log.print("[HTTP Send] >> ");
+    //             u8x8log.print(data);
+    //             u8x8log.print("\n");
+    // #endif
+    //           }
+    //           else
+    //           {
+    //             DebugSerial.println("Send Fail!!!");
+    // #if defined(USE_LCD)
+    //             u8x8log.print("Send Fail!!!\n");
+    // #endif
+    //           }
 
-          /* 4-1 :TCP Socket Recv Data */
-          if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
-          {
-            DebugSerial.print("[RecvSize] >> ");
-            DebugSerial.println(recvSize);
-            DebugSerial.print("[Recv] >> ");
-            DebugSerial.println(recvBuffer);
-#if defined(USE_LCD)
-            u8x8log.print("[RecvSize] >> ");
-            u8x8log.print(recvSize);
-            u8x8log.print("\n");
-            u8x8log.print("[Recv] >> ");
-            u8x8log.print(recvBuffer);
-            u8x8log.print("\n");
-#endif
+    //           /* 4-1 :TCP Socket Recv Data */
+    //           if (TYPE1SC.socketRecv(recvBuffer, sizeof(recvBuffer), &recvSize) == 0)
+    //           {
+    //             DebugSerial.print("[RecvSize] >> ");
+    //             DebugSerial.println(recvSize);
+    //             DebugSerial.print("[Recv] >> ");
+    //             DebugSerial.println(recvBuffer);
+    // #if defined(USE_LCD)
+    //             u8x8log.print("[RecvSize] >> ");
+    //             u8x8log.print(recvSize);
+    //             u8x8log.print("\n");
+    //             u8x8log.print("[Recv] >> ");
+    //             u8x8log.print(recvBuffer);
+    //             u8x8log.print("\n");
+    // #endif
 
-            // http 메시지 처리
-            // 1. 헤더와 바디 분리
-            const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
-            if (jsonStart == NULL)
-            {
-              DebugSerial.println("Cannot find Http Header...");
-              httpRecvOK = false;
-            }
-            else // JSON 구분 성공 시 파싱
-            {
-              // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
-              jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
+    //             // http 메시지 처리
+    //             // 1. 헤더와 바디 분리
+    //             const char *jsonStart = strstr(recvBuffer, "\r\n\r\n"); // 빈 줄을 찾아 헤더 끝 구분
+    //             if (jsonStart == NULL)
+    //             {
+    //               DebugSerial.println("Cannot find Http Header...");
+    //               httpRecvOK = false;
+    //             }
+    //             else // JSON 구분 성공 시 파싱
+    //             {
+    //               // 빈 줄 뒤로 넘어가서 바디 부분을 가리킴
+    //               jsonStart += 4; // \r\n\r\n 길이만큼 포인터 이동
 
-              // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
-              const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
-              if (jsonPart == NULL)
-              {
-                DebugSerial.println("Cannot find JSON data...");
-              }
-              else
-              {
-                // http메시지 저장 로직
-                parseHttpAndAddSchedule(jsonPart);
+    //               // chunked 인코딩 부분 생략 (실제로는 이 처리 필요)
+    //               const char *jsonPart = strchr(jsonStart, '['); // JSON 시작 위치 찾기
+    //               if (jsonPart == NULL)
+    //               {
+    //                 DebugSerial.println("Cannot find JSON data...");
+    //               }
+    //               else
+    //               {
+    //                 // http메시지 저장 로직
+    //                 parseHttpAndAddSchedule(jsonPart);
 
-                httpRecvOK = true;
+    //                 httpRecvOK = true;
 
-              } // if jsonPart == NULL
-            } // if jsonStart == NULL
-          } // if TYPE1SC.socketRecv()
-          else
-          {
-            httpRecvOK = false;
-            DebugSerial.println("Recv Fail!!!");
-#if defined(USE_LCD)
-            u8x8log.print("Recv Fail!!!\n");
-#endif
-          }
-          delay(2000); // 2초 후 재시도
-        } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
-        httpTryCount = 0; // http 통신 시도 횟수 초기화
+    //               } // if jsonPart == NULL
+    //             } // if jsonStart == NULL
+    //           } // if TYPE1SC.socketRecv()
+    //           else
+    //           {
+    //             httpRecvOK = false;
+    //             DebugSerial.println("Recv Fail!!!");
+    // #if defined(USE_LCD)
+    //             u8x8log.print("Recv Fail!!!\n");
+    // #endif
+    //           }
+    //           delay(2000); // 2초 후 재시도
+    //         } // while (최대 3회; httpRecvOK == true거나 3회 초과 시 탈출)
+    //         httpTryCount = 0; // http 통신 시도 횟수 초기화
 
-        // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
-        // 일단 미구현; 성공한다고 가정
-        if (httpRecvOK == false)
-        {
-          // DebugSerial.println("[ALERT] Server Returns result: false...");
-          // DebugSerial.println("Running Factory Reset...");
+    //         // http 메시지 수신에 문제가 있으면 공장 초기화 수행(SPIFFS 삭제 및 재부팅 -> 설정 IP안내)
+    //         // 일단 미구현; 성공한다고 가정
+    //         if (httpRecvOK == false)
+    //         {
+    //           // DebugSerial.println("[ALERT] Server Returns result: false...");
+    //           // DebugSerial.println("Running Factory Reset...");
 
-          // SPIFFS.remove(mqttUsernamePath);
-          // SPIFFS.remove(mqttPwPath);
-          // SPIFFS.remove(sensorId_01Path);
-          // SPIFFS.remove(sensorId_02Path);
-          // SPIFFS.remove(relayIdPath);
-          // SPIFFS.remove(BROKER_IDPath);
-          // SPIFFS.remove(BROKER_PORTPath);
+    //           // SPIFFS.remove(mqttUsernamePath);
+    //           // SPIFFS.remove(mqttPwPath);
+    //           // SPIFFS.remove(sensorId_01Path);
+    //           // SPIFFS.remove(sensorId_02Path);
+    //           // SPIFFS.remove(relayIdPath);
+    //           // SPIFFS.remove(BROKER_IDPath);
+    //           // SPIFFS.remove(BROKER_PORTPath);
+    //           SPIFFS.remove(numberOfValvesPath);
 
-          // DebugSerial.println("Factory Reset Complete.");
+    //           // DebugSerial.println("Factory Reset Complete.");
 
-          // DebugSerial.println("ESP will restart.");
-          // delay(1000);
-          // ESP.restart();
-        }
+    //           // DebugSerial.println("ESP will restart.");
+    //           // delay(1000);
+    //           // ESP.restart();
+    //         }
 
-      } // for (int i = 0; i < schedulePages; i++)
+    //       } // for (int i = 0; i < schedulePages; i++)
 
-      // 디버그 모든 스케줄 출력
-      manager.printAllSchedules();
+    //       // 디버그 모든 스케줄 출력
+    //       manager.printAllSchedules();
 
-    } // if (farmtalkServerLoginResult == 0)
+    //     } // if (farmtalkServerLoginResult == 0)
 
     /* 5 :TCP Socket DeActivation */
     if (TYPE1SC.socketDeActivate() == 0)
@@ -4516,8 +4520,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      // xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     if (relayId == "relayId_16ch")
@@ -4525,8 +4529,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      // xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     // 온습도 센서 Task 생성 및 등록 (우선순위: 6)
