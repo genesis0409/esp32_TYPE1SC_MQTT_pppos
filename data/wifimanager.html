@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>팜톡스위치 매니저</title>
+    <title>팜톡밸브 매니저</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
@@ -74,15 +74,20 @@
             <hr class="hr-text" data-content="부착 기기" />
             <dl>
               <dt>
-                <label for="relayId" id="label-relayId">Relay</label>
+                <label for="numberOfValves" id="label-numberOfValves"
+                  >밸브 수량</label
+                >
               </dt>
               <dd>
-                <select id="relayId" name="relayId" class="comboBox">
-                  <!-- 릴레이는 Modbus ID: 1 -->
-                  <option value="relayId_4ch">4 channels</option>
-                  <option value="relayId_8ch">8 channels</option>
-                  <option value="relayId_16ch">16 channels</option>
-                </select>
+                <input
+                  type="number"
+                  id="numberOfValves"
+                  name="numberOfValves"
+                  value="0"
+                  min="1"
+                  max="30"
+                  required
+                />
               </dd>
             </dl>
           </div>

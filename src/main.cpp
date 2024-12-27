@@ -63,6 +63,7 @@ const char *PARAM_INPUT_7 = "sensorId_02";
 // const char *PARAM_INPUT_8 = "slaveId_02";
 const char *PARAM_INPUT_9 = "relayId";
 // const char *PARAM_INPUT_10 = "slaveId_relay";
+const char *PARAM_INPUT_11 = "numberOfValves";
 
 // Variables to save values from HTML form
 String mqttUsername;
@@ -75,6 +76,7 @@ String sensorId_02;
 // String slaveId_02;
 String relayId;
 // String slaveId_relay;
+String numberOfValves;
 
 // File paths to save input values permanently
 const char *mqttUsernamePath = "/mqttUsername.txt";
@@ -87,6 +89,7 @@ const char *sensorId_02Path = "/sensorId_02.txt";
 // const char *slaveId_02Path = "/slaveId_02.txt";
 const char *relayIdPath = "/relayId.txt";
 // const char *slaveId_relayPath = "/slaveId_relay.txt";
+const char *numberOfValvesPath = "/numberOfValves.txt";
 
 const char *BROKER_IDPath = "/BROKER_ID.txt";
 const char *BROKER_PORTPath = "/BROKER_PORT.txt";
@@ -3459,6 +3462,7 @@ void setup()
   // slaveId_02 = readFile(SPIFFS, slaveId_02Path);
   relayId = readFile(SPIFFS, relayIdPath);
   // slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
+  numberOfValves = readFile(SPIFFS, numberOfValvesPath);
 
   // Debug Print
   DebugSerial.print("mqttUsername in SPIFFS: ");
@@ -3481,6 +3485,8 @@ void setup()
   DebugSerial.println(relayId);
   // DebugSerial.print("slaveId_relay in SPIFFS: ");
   // DebugSerial.println(slaveId_relay);
+  DebugSerial.print("numberOfValves in SPIFFS: ");
+  DebugSerial.println(numberOfValves);
 
   DebugSerial.println();
 
@@ -3598,6 +3604,16 @@ void setup()
           //   // Write file to save value
           //   writeFile(SPIFFS, slaveId_relayPath, slaveId_relay.c_str());
           // }
+          // HTTP POST numberOfValves value
+          if (p->name() == PARAM_INPUT_11)
+          {
+            numberOfValves = p->value().c_str();
+            Serial.print("numberOfValves set to: ");
+            Serial.println(numberOfValves);
+            // Write file to save value
+            writeFile(SPIFFS, numberOfValvesPath, numberOfValves.c_str());
+          }
+
           Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
       }
