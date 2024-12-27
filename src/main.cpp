@@ -54,7 +54,7 @@ AsyncWebServer server(80);
 
 // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_1 = "mqttUsername";
-const char *PARAM_INPUT_2 = "mqttPw2";
+const char *PARAM_INPUT_2 = "mqttPw";
 // const char *PARAM_INPUT_3 = "hostId";
 // const char *PARAM_INPUT_4 = "port";
 const char *PARAM_INPUT_5 = "sensorId_01";
