@@ -217,10 +217,12 @@ bool atMode = true;
 #define MQTT_SERVER "broker.hivemq.com" // BROKER_ID로 대체
 
 // 241114 TOPIC 구조 개편
-const String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/farmtalkSwitch00/control/r-; msg: on/off/state
-const String PUB_TOPIC = "type1sc";          // 발행 주제: type1sc/farmtalkSwitch00/update;
-const String PUB_TOPIC_SENSOR = "type1sc";   // 센서 발행 주제 type1sc/farmtalkSwitch00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
-const String PUB_TOPIC_SCHEDULE = "type1sc"; // 스케줄 발행 주제 type1sc/farmtalkSwitch00/{스케줄기능토픽}; 페이로드: 스케줄 JSON
+const String SUB_TOPIC = "type1sc";          // 구독 주제: type1sc/FTV/farmtalkValve00/control/r-; msg: on/off
+const String PUB_TOPIC = "type1sc";          // 발행 주제: type1sc/FTV/farmtalkValve00/update;
+const String PUB_TOPIC_SENSOR = "type1sc";   // 센서 발행 주제 type1sc/FTV/farmtalkValve00/sensor/1(temp) 2(humi) 4(rain) 12(ec) 15(soilP); msg: value
+const String PUB_TOPIC_SCHEDULE = "type1sc"; // 스케줄 발행 주제 type1sc/FTV/farmtalkValve00/{스케줄기능토픽}; 페이로드: 스케줄 JSON
+
+const String FTV_TOPIC = "/FTV"; // (가칭)팜톡밸브 주제: type1sc/FTV/farmtalkValve00/control/r-; msg: on/off
 
 const String CONTROL_TOPIC = "/control"; // /control
 const String UPDATE_TOPIC = "/update";   // /update
@@ -322,9 +324,10 @@ struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
   uint16_t writingRegisters[4] = {0, (const uint16_t)0, 0, 0};     // 각 2바이트; {타입, pw, 제어idx, 시간} (8채널용)
   uint16_t writingRegisters_Expand[3] = {(const uint16_t)0, 0, 0}; // 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
   String payloadBuffer;
-  String *rStr = nullptr; // 파싱된 문자열 저장변수
-  String suffix;          // 추가할 문자열을 설정
-  uint8_t index_relay;    // r1~r8: 0~7
+  String *rStr = nullptr;         // 파싱된 문자열 저장변수
+  String suffix;                  // 추가할 문자열을 설정
+  uint8_t index_relay;            // r1~r8: 0~7
+  uint8_t slaveId_current_module; // 현재 작동시킬 릴레이 모듈 ID 정보
 };
 QueueHandle_t modbusQueue; // Task와 콜백 함수에서 데이터를 교환하기 위한 Queue를 생성
 
@@ -403,8 +406,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
         /* Serial1 Initialization */
         // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-        // Modbus slave ID 1
-        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
+        // Modbus slave ID: callback 에서 ID 결정
+        modbus.begin(receivedData.slaveId_current_module, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
         // 이하 Modbus 작업 수행
         uint16_t localWritingRegisters[4];
