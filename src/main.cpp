@@ -341,7 +341,7 @@ ESP32_SDI12 sdi12(sdi12DataPin);
 ESP32_SDI12::Status sdi12_Sensor_result_soil;
 
 // callback - 토픽 파싱해 릴레이 모듈과 릴레이 인덱스를 구분하고 데이터를 구성해 큐로 보내는 함수
-void process_FTV_Topic(String topic_module, String topic_index, ModbusData modbusData);
+void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modbusData);
 
 // 각 node task
 void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
@@ -379,7 +379,7 @@ String testMsg3 = "";
 String testMsg4 = "";
 
 // callback - 토픽 파싱해 릴레이 모듈과 릴레이 인덱스를 구분하고 데이터를 구성해 큐로 보내는 함수
-void process_FTV_Topic(String topic_module, String topic_index, ModbusData modbusData)
+void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modbusData)
 {
   int mIndex = 0; // 모듈 인덱스 (릴레이 Modbus ID)
   int rIndex = 0; // 릴레이 인덱스
@@ -405,12 +405,47 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData modbu
     DebugSerial.println(topic_index);
   }
 
-  if (rIndex >= 1 && rIndex <= 32) // 최대 32채널 릴레이, html과 modbus task 32채널용 확장 개발 병행 요
+  if (rIndex >= 1 && rIndex <= 16) // 최대 16채널 릴레이
   {
     // modbusData 설정
-    modbusData.slaveId_current_module = mIndex; // 모듈 인덱스: 릴레이 Modbus ID
-    modbusData.suffix = "/r" + rIndex;          // "/r01" 등 릴레이 토픽 부분
-    modbusData.index_relay = rIndex - 1;        // 0부터 시작하는 인덱스
+    modbusData.slaveId_current_module = mIndex;     // 모듈 인덱스: 릴레이 Modbus ID
+    modbusData.suffix = "/r" + String(topic_index); // "/r01" 등 릴레이 토픽 부분
+    modbusData.index_relay = rIndex - 1;            // 0부터 시작하는 인덱스
+
+    // Debug Log
+    // DebugSerial.print("writingRegisters[4]: ");
+    // for (int i = 0; i < 4; i++)
+    // {
+    //   DebugSerial.print(modbusData.writingRegisters[i]);
+    //   DebugSerial.print(" ");
+    // }
+    // DebugSerial.println();
+
+    // DebugSerial.print("writingRegisters_Expand[3]: ");
+    // for (int i = 0; i < 3; i++)
+    // {
+    //   DebugSerial.print(modbusData.writingRegisters_Expand[i]);
+    //   DebugSerial.print(" ");
+    // }
+    // DebugSerial.println();
+
+    // DebugSerial.print("payloadBuffer: ");
+    // DebugSerial.println(modbusData.payloadBuffer);
+
+    // DebugSerial.print("rStr: ");
+    // for (int i = 0; i < 2; i++)
+    // {
+    //   DebugSerial.print(modbusData.rStr[i]);
+    //   DebugSerial.print(" ");
+    // }
+    // DebugSerial.println();
+
+    // DebugSerial.print("suffix: ");
+    // DebugSerial.println(modbusData.suffix);
+    // DebugSerial.print("index_relay: ");
+    // DebugSerial.println(modbusData.index_relay);
+    // DebugSerial.print("slaveId_current_module: ");
+    // DebugSerial.println(modbusData.slaveId_current_module);
 
     xQueueSend(modbusQueue, &modbusData, portMAX_DELAY); // Queue에 전송
   }
@@ -2615,7 +2650,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   // topicStr[1]: FTSW/FTV 구분
   // topicStr[2]: userID
   // topicStr[3]: 제어 토픽 ('control')
-  // topicStr[4]: 모듈 ID, /state, /ResAddSch, /ResUpdateSch, /ResDelSch, /ReqHeatbit
+  // topicStr[4]: 모듈 ID, state, ResAddSch, ResUpdateSch, ResDelSch, ReqHeatbit
   // topicStr[5]: 릴레이 인덱스
 
   int cnt_topic = 0; // Split()으로 분할된 문자열의 개수
@@ -2639,7 +2674,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   // DebugSerial.println(rStr[1]); // delayTime
   // DebugSerial.println(isNumeric(rStr[1]));
 
-  if (topicStr[4] == "/state") // 장치 상태 요청 토픽
+  if (topicStr[4] == "state") // 장치 상태 요청 토픽
   {
     // float temp = 0;          // 온도/1
     // float humi = 0;          // 습도/2
@@ -2656,7 +2691,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
 
   // 스케줄 기능 토픽
-  else if (topicStr[4] == "/ResAddSch") // 스케줄 추가 기능 수행
+  else if (topicStr[4] == "ResAddSch") // 스케줄 추가 기능 수행
   {
     // 파싱-데이터저장-기능수행
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
@@ -2670,7 +2705,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
-  else if (topicStr[4] == "/ResUpdateSch") // 스케줄 수정 기능 수행
+  else if (topicStr[4] == "ResUpdateSch") // 스케줄 수정 기능 수행
   {
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
@@ -2683,7 +2718,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     }
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
-  else if (topicStr[4] == "/ResDelSch") // 스케줄 삭제 기능 수행
+  else if (topicStr[4] == "ResDelSch") // 스케줄 삭제 기능 수행
   {
     const char *jsonPart = strchr(modbusData.payloadBuffer.c_str(), '{'); // JSON 시작 위치 찾기
     if (jsonPart == NULL)
@@ -2697,7 +2732,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     return; // 조건 만족 시 더 이상 진행하지 않음
   }
 
-  else if (topicStr[4] == "/ReqHeatbit") // 테스트 비트
+  else if (topicStr[4] == "ReqHeatbit") // 테스트 비트
   {
     char pubMsg[PUBLISH_MSG_SIZE_MIN];
     int offset = 0; // 현재 버퍼의 위치 관리
