@@ -2774,7 +2774,7 @@ void reconnect()
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
     // if (client.connect(mqttUsername.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
-    if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + " " + WILL_MESSAGE).c_str()))
+    if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + " " + WILL_MESSAGE).c_str()))
     {
       DebugSerial.println("MQTT connected");
 
@@ -3132,7 +3132,7 @@ void getTime()
   char szTimeString[32]; // 시간 정보 저장 변수
   if (TYPE1SC.getCCLK(szTimeString, sizeof(szTimeString)) == 0)
   {
-    // client.publish((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/time").c_str(), szTime);
+    // client.publish((PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC + "/time").c_str(), szTime);
   }
   else
   {
@@ -3653,8 +3653,8 @@ void setup()
     // Topic 관련 변수 초기화
     DEVICE_TOPIC = "/" + mqttUsername;
 
-    // "type1sc/farmtalkSwitch00/update"의 길이 정보: 241115 사용 안하는 중
-    int PUB_TOPIC_length = strlen((PUB_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str()); // pub_topic의 길이 계산
+    // "type1sc/FTV/farmtalkSwitch00/update"의 길이 정보: 241115 사용 안하는 중
+    int PUB_TOPIC_length = strlen((PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str()); // pub_topic의 길이 계산
 
     DebugSerial.println("TYPE1SC Module Start!!!");
 
