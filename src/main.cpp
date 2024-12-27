@@ -4550,23 +4550,23 @@ void setup()
     // 메시지 발행 Task 생성
     xTaskCreate(msg_publish_task, "msg_publish_task", 4096, NULL, 4, NULL);
 
-    if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
-    {
-      // DebugSerial.print("relayId: ");
-      // DebugSerial.println(relayId);
+    // if (relayId == "relayId_8ch" || relayId == "relayId_4ch")
+    // {
+    //   // DebugSerial.print("relayId: ");
+    //   // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      // xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-    }
+    xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    // xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    // }
 
-    if (relayId == "relayId_16ch")
-    {
-      // DebugSerial.print("relayId: ");
-      // DebugSerial.println(relayId);
+    // if (relayId == "relayId_16ch")
+    // {
+    //   // DebugSerial.print("relayId: ");
+    //   // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      // xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-    }
+    //   xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    //   // xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    // }
 
     // 온습도 센서 Task 생성 및 등록 (우선순위: 6)
     if (sensorId_01 == "sensorId_th" || sensorId_02 == "sensorId_th")
