@@ -466,7 +466,7 @@ void MqttBotTask(void *pvParameters)
   TickType_t xLastWakeTime = xTaskGetTickCount();
   const TickType_t xWakePeriod = 600 * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [600 sec]
 
-  vTaskDelay(2000 / portTICK_PERIOD_MS);
+  vTaskDelay(120000 / portTICK_PERIOD_MS);
 
   bool switchFlag = false;
 
@@ -476,10 +476,14 @@ void MqttBotTask(void *pvParameters)
     if (switchFlag)
     {
       client.publish("type1sc/FTV/ftv03/control/01/01", "on&0");
+      DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
+      DebugSerial.println("on&0");
     }
     else
     {
       client.publish("type1sc/FTV/ftv03/control/01/01", "off&0");
+      DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
+      DebugSerial.println("off&0");
     }
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
