@@ -262,7 +262,7 @@ const char *getStatus(int value);                        // bit를 topic으로 �
 /* EXT_ANT_ON 0 : Use an internal antenna.
  * EXT_ANT_ON 1 : Use an external antenna.
  */
-#define EXT_ANT_ON 1
+#define EXT_ANT_ON 0
 
 void extAntenna()
 {
@@ -344,6 +344,7 @@ ESP32_SDI12::Status sdi12_Sensor_result_soil;
 void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modbusData);
 
 // 각 node task
+void MqttBotTask(void *pvParameters);                    // MqttBotTask
 void ModbusTask_Relay_8ch(void *pvParameters);           // Task에 등록할 modbus relay 제어
 void ModbusTask_Relay_16ch(void *pvParameters);          // Task에 등록할 modbus relay 제어
 void ModbusTask_Relay_8ch_Schedule(void *pvParameters);  // 스케줄에 의한 modbus relay 제어
@@ -455,6 +456,33 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modb
   {
     DebugSerial.print("rIndex ERROR: ");
     DebugSerial.println(rIndex);
+  }
+}
+
+// pppos client task보다 우선하는 MqttBotTask
+void MqttBotTask(void *pvParameters)
+{
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  const TickType_t xWakePeriod = 600 * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [600 sec]
+
+  vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+  bool switchFlag = false;
+
+  while (1)
+  {
+    switchFlag = !switchFlag;
+    if (switchFlag)
+    {
+      client.publish("type1sc/FTV/ftv03/control/01/01", "on&0");
+    }
+    else
+    {
+      client.publish("type1sc/FTV/ftv03/control/01/01", "off&0");
+    }
+
+    vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
 }
 
@@ -4578,7 +4606,9 @@ void setup()
     //   // DebugSerial.print("relayId: ");
     //   // DebugSerial.println(relayId);
 
-    xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    xTaskCreate(&MqttBotTask, "MqttBotTask", 4096, NULL, 7, NULL); // MqttBotTask 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+
+    // xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     // xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     // }
 
