@@ -2208,14 +2208,20 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
       int updated_Day = timeInfo_ESP_Updated.tm_yday;
       int updated_Weekday = timeInfo_ESP_Updated.tm_wday; // 0=일요일, 6=토요일
 
-      ScheduleData data;
-
       for (auto &item : manager.getAllSchedules())
       {
         ScheduleDB &schedule = item.second;
 
         // 하루가 바뀌면 실행 플래그 초기화
         schedule.resetExecutedToday(updated_Day);
+
+        ScheduleData data = {
+            // 각 스케줄마다 새로운 데이터 구조체 생성
+            .num = 0,
+            .value = false,
+            .delay = 0,
+            .timeInfo = {0} // tm 구조체 zero 초기화
+        };
 
         if (schedule.getEnable()) // 활성화된 스케줄인가?
         {
