@@ -361,6 +361,8 @@ void TimeTask_Count_Scheduled_Delay(void *pvParameters); // ESP32 내부 타이�
 void log_print_task(void *pvParameters);   // 큐에서 로그 메시지를 꺼내서 시리얼 포트로 출력하는 Task
 void msg_publish_task(void *pvParameters); // 큐에서 메시지를 꺼내서 MQTT로 발행하는 Task
 
+TickType_t getTickDifference(TickType_t currentTick, TickType_t lastTick); // 틱 카운트 차이를 안전하게 계산하는 함수: 오버플로우 고려
+
 // 각 센서별 Slave ID 고정 지정
 const int slaveId_relay = 1;
 const int slaveId_th = 4;
@@ -2201,6 +2203,21 @@ void SDI12Task_Sensor_soil(void *pvParameters)
   } while (true);
 }
 
+// 틱 카운트 차이를 안전하게 계산하는 함수: 오버플로우 고려
+TickType_t getTickDifference(TickType_t currentTick, TickType_t lastTick)
+{
+  // 오버플로우 고려한 계산
+  if (currentTick >= lastTick)
+  {
+    return currentTick - lastTick;
+  }
+  else
+  {
+    // 오버플로우 발생한 경우: currentTick이 xTaskGetTickCount()으로 인해 (32비트: 49.7일 후) 오버플로우 발생하면 0부터 시작됨
+    return (portMAX_DELAY - lastTick) + currentTick + 1;
+  }
+}
+
 // NTP 서버와 시간을 동기화하는 Task
 void TimeTask_NTPSync(void *pvParameters)
 {
@@ -2295,14 +2312,20 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
       int updated_Day = timeInfo_ESP_Updated.tm_yday;
       int updated_Weekday = timeInfo_ESP_Updated.tm_wday; // 0=일요일, 6=토요일
 
-      ScheduleData data;
-
       for (auto &item : manager.getAllSchedules())
       {
         ScheduleDB &schedule = item.second;
 
         // 하루가 바뀌면 실행 플래그 초기화
         schedule.resetExecutedToday(updated_Day);
+
+        ScheduleData data = {
+            // 각 스케줄마다 새로운 데이터 구조체 생성
+            .num = 0,
+            .value = false,
+            .delay = 0,
+            .timeInfo = {0} // tm 구조체 zero 초기화
+        };
 
         if (schedule.getEnable()) // 활성화된 스케줄인가?
         {
