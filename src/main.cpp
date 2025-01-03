@@ -666,8 +666,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
             // [0], [1] 발행 토픽과 페이로드, 구분자 추가: {topic}${jsonPayload}$
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
-                               "%s%s%s$%s$",
-                               PUB_TOPIC, DEVICE_TOPIC, "/restate",
+                               "%s%s%s%s$%s$",
+                               PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, "/restate",
                                jsonPayload.c_str());
             if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
             {
@@ -782,8 +782,8 @@ void ModbusTask_Relay_8ch(void *pvParameters)
 
             // [0] 발행 토픽과 구분자 추가: {topic}$
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                               "%s%s%s$",
-                               PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
+                               "%s%s%s%s$",
+                               PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
             if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
             {
               DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
@@ -1006,8 +1006,8 @@ void ModbusTask_Relay_8ch_Schedule(void *pvParameters)
 
           // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$
           written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
-                             "%s%s%s%s$%d&%s&%d$",
-                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
+                             "%s%s%s%s%s$%d&%s&%d$",
+                             PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
                              data.num, data.value ? "on" : "off", data.delay);
           if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
           {
@@ -1287,8 +1287,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
             // [0], [1] 발행 토픽과 페이로드, 구분자 추가: {topic}${jsonPayload}$
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
-                               "%s%s%s$%s$",
-                               PUB_TOPIC, DEVICE_TOPIC, "/restate",
+                               "%s%s%s%s$%s$",
+                               PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, "/restate",
                                jsonPayload.c_str());
             if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
             {
@@ -1430,8 +1430,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
             // [0] 발행 토픽과 구분자 추가: {topic}$
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                               "%s%s%s$",
-                               PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
+                               "%s%s%s%s$",
+                               PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC);
             if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
             {
               DebugSerial.println("Error: Buffer overflow during Relay_State_Topic&Payload creation!");
@@ -1680,8 +1680,8 @@ void ModbusTask_Relay_16ch_Schedule(void *pvParameters)
 
           // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$
           written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
-                             "%s%s%s%s$%d&%s&%d$",
-                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
+                             "%s%s%s%s%s$%d&%s&%d$",
+                             PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh",
                              data.num, data.value ? "on" : "off", data.delay);
           if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
           {
@@ -2496,8 +2496,8 @@ void TimeTask_Count_Scheduled_Delay(void *pvParameters)
 
           // [0], [1] 스케줄 토픽과 페이로드, 구분자 추가: {topic}${1&on&10}$$$
           written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE - offset,
-                             "%s%s%s%s%s$%d&%s&%d&%d$$$",
-                             PUB_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh", "Done",
+                             "%s%s%s%s%s%s$%d&%s&%d&%d$$$",
+                             PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, UPDATE_TOPIC, "sh", "Done",
                              delayTimers[i].num, delayTimers[i].value ? "on" : "off", delayTimers[i].delay_origin, !delayTimers[i].value);
           if (written < 0 || written >= (PUBLISH_MSG_SIZE - offset))
           {
@@ -2770,8 +2770,8 @@ void callback(char *topic, byte *payload, unsigned int length)
     DebugSerial.println("[Debug Point 07] [TEST] ReqHeatbit");
 
     written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                       "%s%s%s$%s",
-                       PUB_TOPIC, DEVICE_TOPIC, "/ResHeatbit", "ESP32");
+                       "%s%s%s%s$%s",
+                       PUB_TOPIC, FTV_TOPIC, DEVICE_TOPIC, "/ResHeatbit", "ESP32");
     if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
     {
       DebugSerial.println("Error: Buffer overflow during Schedule_Topic creation!");
@@ -2868,7 +2868,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/1").c_str(), String(temp).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/1");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/1");
     // DebugSerial.println("] ");
     // DebugSerial.print(temp);
     // DebugSerial.println("℃");
@@ -2882,7 +2882,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/2").c_str(), String(humi).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/2");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/2");
     // DebugSerial.println("] ");
     // DebugSerial.print(humi);
     // DebugSerial.println("%");
@@ -2896,7 +2896,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/4").c_str(), String(isRainy ? 1 : 0).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/4");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/4");
     // DebugSerial.println("] ");
     // DebugSerial.println(isRainy ? 1 : 0);
 
@@ -2909,7 +2909,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/12").c_str(), String(ec).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/12");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/12");
     // DebugSerial.println("] ");
     // DebugSerial.print(ec);
     // DebugSerial.println("mS/cm");
@@ -2923,7 +2923,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/17").c_str(), String(soilTemp).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/17");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/17");
     // DebugSerial.println("] ");
     // DebugSerial.print(soilTemp);
     // DebugSerial.println("℃");
@@ -2936,7 +2936,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/14").c_str(), String(soilHumi).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/14");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/14");
     // DebugSerial.println("] ");
     // DebugSerial.print(soilHumi);
     // DebugSerial.println("%");
@@ -2950,7 +2950,7 @@ void publishSensorData()
     client.publish((PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/15").c_str(), String(soilPotential).c_str());
 
     // DebugSerial.print("Publish: [");
-    // DebugSerial.print(PUB_TOPIC_SENSOR + DEVICE_TOPIC + SENSOR_TOPIC + "/15");
+    // DebugSerial.print(PUB_TOPIC_SENSOR + FTV_TOPIC + DEVICE_TOPIC + SENSOR_TOPIC + "/15");
     // DebugSerial.println("] ");
     // DebugSerial.print(soilPotential);
     // DebugSerial.println("kPa");
