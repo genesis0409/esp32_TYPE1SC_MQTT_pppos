@@ -61,7 +61,7 @@ const char *PARAM_INPUT_5 = "sensorId_01";
 // const char *PARAM_INPUT_6 = "slaveId_01";
 const char *PARAM_INPUT_7 = "sensorId_02";
 // const char *PARAM_INPUT_8 = "slaveId_02";
-const char *PARAM_INPUT_9 = "relayId";
+// const char *PARAM_INPUT_9 = "relayId";
 // const char *PARAM_INPUT_10 = "slaveId_relay";
 const char *PARAM_INPUT_11 = "numberOfValves";
 
@@ -74,7 +74,7 @@ String sensorId_01;
 // String slaveId_01;
 String sensorId_02;
 // String slaveId_02;
-String relayId;
+// String relayId;
 // String slaveId_relay;
 String numberOfValves;
 
@@ -87,7 +87,7 @@ const char *sensorId_01Path = "/sensorId_01.txt";
 // const char *slaveId_01Path = "/slaveId_01.txt";
 const char *sensorId_02Path = "/sensorId_02.txt";
 // const char *slaveId_02Path = "/slaveId_02.txt";
-const char *relayIdPath = "/relayId.txt";
+// const char *relayIdPath = "/relayId.txt";
 // const char *slaveId_relayPath = "/slaveId_relay.txt";
 const char *numberOfValvesPath = "/numberOfValves.txt";
 
@@ -623,21 +623,24 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             //   relayObj["val"] = (i % 2 == 0); // 임의로 true/false 설정
             // }
 
-            if (relayId == "relayId_4ch")
-            {
-              int relayChannels = 4;
-              createRelayJson(doc, relayChannels, relayState);
-            }
-            else if (relayId == "relayId_8ch")
-            {
-              int relayChannels = 8;
-              createRelayJson(doc, relayChannels, relayState);
-            }
-            else if (relayId == "relayId_16ch")
-            {
-              int relayChannels = 16;
-              createRelayJson(doc, relayChannels, relayState);
-            }
+            // if (relayId == "relayId_4ch")
+            // {
+            //   int relayChannels = 4;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+            // else if (relayId == "relayId_8ch")
+            // {
+            //   int relayChannels = 8;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+            // else if (relayId == "relayId_16ch")
+            // {
+            //   int relayChannels = 16;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+
+            int relayChannels = 2;
+            createRelayJson(doc, relayChannels, relayState);
 
             // JSON 페이로드 출력
             String jsonPayload;
@@ -1241,21 +1244,24 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             //   relayObj["val"] = (i % 2 == 0); // 임의로 true/false 설정
             // }
 
-            if (relayId == "relayId_4ch")
-            {
-              int relayChannels = 4;
-              createRelayJson(doc, relayChannels, relayState);
-            }
-            else if (relayId == "relayId_8ch")
-            {
-              int relayChannels = 8;
-              createRelayJson(doc, relayChannels, relayState);
-            }
-            else if (relayId == "relayId_16ch")
-            {
-              int relayChannels = 16;
-              createRelayJson(doc, relayChannels, relayState);
-            }
+            // if (relayId == "relayId_4ch")
+            // {
+            //   int relayChannels = 4;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+            // else if (relayId == "relayId_8ch")
+            // {
+            //   int relayChannels = 8;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+            // else if (relayId == "relayId_16ch")
+            // {
+            //   int relayChannels = 16;
+            //   createRelayJson(doc, relayChannels, relayState);
+            // }
+
+            int relayChannels = 2;
+            createRelayJson(doc, relayChannels, relayState);
 
             // JSON 페이로드 출력
             String jsonPayload;
@@ -3518,7 +3524,7 @@ void setup()
   // slaveId_01 = readFile(SPIFFS, slaveId_01Path);
   sensorId_02 = readFile(SPIFFS, sensorId_02Path);
   // slaveId_02 = readFile(SPIFFS, slaveId_02Path);
-  relayId = readFile(SPIFFS, relayIdPath);
+  // relayId = readFile(SPIFFS, relayIdPath);
   // slaveId_relay = readFile(SPIFFS, slaveId_relayPath);
   numberOfValves = readFile(SPIFFS, numberOfValvesPath);
 
@@ -3539,8 +3545,8 @@ void setup()
   DebugSerial.println(sensorId_02);
   // DebugSerial.print("slaveId_02 in SPIFFS: ");
   // DebugSerial.println(slaveId_02);
-  DebugSerial.print("relayId in SPIFFS: ");
-  DebugSerial.println(relayId);
+  // DebugSerial.print("relayId in SPIFFS: ");
+  // DebugSerial.println(relayId);
   // DebugSerial.print("slaveId_relay in SPIFFS: ");
   // DebugSerial.println(slaveId_relay);
   DebugSerial.print("numberOfValves in SPIFFS: ");
@@ -3645,14 +3651,14 @@ void setup()
           //   writeFile(SPIFFS, slaveId_02Path, slaveId_02.c_str());
           // }
           // HTTP POST relayId value
-          if (p->name() == PARAM_INPUT_9)
-          {
-            relayId = p->value().c_str();
-            Serial.print("relayId set to: ");
-            Serial.println(relayId);
-            // Write file to save value
-            writeFile(SPIFFS, relayIdPath, relayId.c_str());
-          }
+          // if (p->name() == PARAM_INPUT_9)
+          // {
+          //   relayId = p->value().c_str();
+          //   Serial.print("relayId set to: ");
+          //   Serial.println(relayId);
+          //   // Write file to save value
+          //   writeFile(SPIFFS, relayIdPath, relayId.c_str());
+          // }
           // // HTTP POST slaveId_relay value
           // if (p->name() == PARAM_INPUT_10)
           // {
@@ -3743,18 +3749,20 @@ void setup()
     // 241018 http 메시지를 보내 브로커 정보 수신하는 로직 추가
     // http로 보낼 릴레이/센서 코드 설정
     // 릴레이 코드 설정
-    if (relayId == "relayId_4ch")
-    {
-      code_relay = "4";
-    }
-    else if (relayId == "relayId_8ch")
-    {
-      code_relay = "8";
-    }
-    else if (relayId == "relayId_16ch")
-    {
-      code_relay = "16";
-    }
+    // if (relayId == "relayId_4ch")
+    // {
+    //   code_relay = "4";
+    // }
+    // else if (relayId == "relayId_8ch")
+    // {
+    //   code_relay = "8";
+    // }
+    // else if (relayId == "relayId_16ch")
+    // {
+    //   code_relay = "16";
+    // }
+
+    code_relay = "2";
 
     // 센서 1 코드 설정
     if (sensorId_01 == "")
