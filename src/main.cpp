@@ -2217,7 +2217,9 @@ void TimeTask_ESP_Update_Time(void *pvParameters)
     if (isNTPtimeUpdated)
     {
       // 경과한 Tick을 기준으로 시간 업데이트
-      TickType_t ticksElapsed = xTaskGetTickCount() - lastSyncTickCount;               // 동기화 이후 경과한 Tick 계산
+      TickType_t currentTick = xTaskGetTickCount();
+      TickType_t ticksElapsed = getTickDifference(currentTick, lastSyncTickCount); // 시간 계산 시 오버플로우 방지
+
       time_t updated_time = current_time + (ticksElapsed * portTICK_PERIOD_MS / 1000); // 초 단위로 변환
 
       // 현재 시간 정보 로깅
