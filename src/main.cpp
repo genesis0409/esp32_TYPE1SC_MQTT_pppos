@@ -324,7 +324,7 @@ struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
   String payloadBuffer;
   String *rStr = nullptr; // 파싱된 문자열 저장변수
   String suffix;          // 추가할 문자열을 설정
-  uint8_t index_relay;    // r1~r8: 0~7
+  uint8_t index_relay;    // r1~r16: 0~15
 };
 QueueHandle_t modbusQueue; // Task와 콜백 함수에서 데이터를 교환하기 위한 Queue를 생성
 
@@ -4565,7 +4565,7 @@ void setup()
     }
 
     // NTP 동기화 Task 생성
-    xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
+    xTaskCreate(TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
     // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 Task 생성
     xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 4096, NULL, 6, NULL);
@@ -4584,8 +4584,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL);                   // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     if (relayId == "relayId_16ch")
@@ -4593,8 +4593,8 @@ void setup()
       // DebugSerial.print("relayId: ");
       // DebugSerial.println(relayId);
 
-      xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-      xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL);                   // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+      xTaskCreate(ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     }
 
     // 온습도 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4613,7 +4613,7 @@ void setup()
       // DebugSerial.print("slaveId_th: ");
       // DebugSerial.println(slaveId_th);
 
-      xTaskCreate(&ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
     }
 
     // TM100 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4632,7 +4632,7 @@ void setup()
       // DebugSerial.print("slaveId_tm100: ");
       // DebugSerial.println(slaveId_tm100);
 
-      xTaskCreate(&ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
     }
 
     // 감우 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4652,7 +4652,7 @@ void setup()
       // DebugSerial.print("slaveId_rain: ");
       // DebugSerial.println(slaveId_rain);
 
-      xTaskCreate(&ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
     }
 
     // 지온·지습·EC 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4671,7 +4671,7 @@ void setup()
       // DebugSerial.print("slaveId_ec: ");
       // DebugSerial.println(slaveId_ec);
 
-      xTaskCreate(&ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
     }
 
     // 수분장력 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4690,7 +4690,7 @@ void setup()
       // DebugSerial.print("slaveId_soil: ");
       // DebugSerial.println(slaveId_soil);
 
-      xTaskCreate(&SDI12Task_Sensor_soil, "Task_soil", 4096, NULL, 6, NULL);
+      xTaskCreate(SDI12Task_Sensor_soil, "Task_soil", 4096, NULL, 6, NULL);
     }
   }
 }
