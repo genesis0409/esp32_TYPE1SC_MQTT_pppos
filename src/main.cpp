@@ -193,8 +193,8 @@ bool allows2ndSensorTaskDelay = false;
 bool allows3rdSensorTaskDelay = false; // 미사용; 240614 센서 2개까지만 운용
 
 // PPPOS, MQTT settings ***************************************************************************
-const char *ppp_user = "farmtalkSwitch";
-const char *ppp_pass = "farmtalk@123";
+const char *ppp_user = "codezoo";
+const char *ppp_pass = "codezoo";
 
 char *apnAddr = "simplio.apn"; /* Vodafone Global IoT SIM APN */
 TYPE1SC TYPE1SC(M1Serial, DebugSerial, PWR_PIN, RST_PIN, WAKEUP_PIN);
