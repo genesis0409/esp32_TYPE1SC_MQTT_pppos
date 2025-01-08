@@ -462,29 +462,64 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modb
 // pppos client task보다 우선하는 MqttBotTask
 void MqttBotTask(void *pvParameters)
 {
+  const TickType_t xWakePeriod = 2 * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [2 sec]
+  vTaskDelay(60000 / portTICK_PERIOD_MS);
 
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xWakePeriod = 600 * PERIOD_CONSTANT / portTICK_PERIOD_MS; //  주기: [600 sec]
-
-  vTaskDelay(120000 / portTICK_PERIOD_MS);
+  // 오버플로우 안전한 방식으로 수정
+  TickType_t xLastWakeTime;
 
   bool switchFlag = false;
+  int switchCount = 0;
 
   while (1)
   {
-    switchFlag = !switchFlag;
-    if (switchFlag)
+    // vTaskDelayUntil() 오버플로우 방지를 위해 매 루프마다 현재 틱 카운트를 새로 가져옴
+    xLastWakeTime = xTaskGetTickCount();
+
+    // FTV 반복 제어
+    //  switchFlag = !switchFlag;
+    //  if (switchFlag)
+    //  {
+    //    client.publish("type1sc/FTV/ftv03/control/01/01", "on&0");
+    //    DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
+    //    DebugSerial.println("on&0");
+    //  }
+    //  else
+    //  {
+    //    client.publish("type1sc/FTV/ftv03/control/01/01", "off&0");
+    //    DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
+    //    DebugSerial.println("off&0");
+    //  }
+
+    // FTSW 반복 제어
+    // 1~4채널 on/off 반복
+    if (switchCount == 0)
     {
-      client.publish("type1sc/FTV/ftv03/control/01/01", "on&0");
-      DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
-      DebugSerial.println("on&0");
+      switchFlag = !switchFlag;
+      client.publish("type1sc/sw06/control/r01", switchFlag ? "on&0" : "off&0");
+      DebugSerial.println("type1sc/sw06/control/r01");
+      DebugSerial.println(switchFlag ? "on&0" : "off&0");
     }
-    else
+    if (switchCount == 1)
     {
-      client.publish("type1sc/FTV/ftv03/control/01/01", "off&0");
-      DebugSerial.println("type1sc/FTV/ftv03/control/01/01");
-      DebugSerial.println("off&0");
+      client.publish("type1sc/sw06/control/r02", switchFlag ? "on&0" : "off&0");
+      DebugSerial.println("type1sc/sw06/control/r02");
+      DebugSerial.println(switchFlag ? "on&0" : "off&0");
     }
+    if (switchCount == 2)
+    {
+      client.publish("type1sc/sw06/control/r03", switchFlag ? "on&0" : "off&0");
+      DebugSerial.println("type1sc/sw06/control/r03");
+      DebugSerial.println(switchFlag ? "on&0" : "off&0");
+    }
+    if (switchCount == 3)
+    {
+      client.publish("type1sc/sw06/control/r04", switchFlag ? "on&0" : "off&0");
+      DebugSerial.println("type1sc/sw06/control/r04");
+      DebugSerial.println(switchFlag ? "on&0" : "off&0");
+    }
+
+    switchCount = (switchCount + 1) % 4; // 1, 2, 3, 0
 
     vTaskDelayUntil(&xLastWakeTime, xWakePeriod);
   }
@@ -4591,7 +4626,7 @@ void setup()
     }
 
     // NTP 동기화 Task 생성
-    xTaskCreate(&TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
+    xTaskCreate(TimeTask_NTPSync, "TimeTask_NTPSync", 4096, NULL, 8, NULL);
 
     // 내부 타이머로 시간 업데이트하고 스케줄 작업 실행하는 Task 생성
     xTaskCreate(TimeTask_ESP_Update_Time, "TimeTask_ESP_Update_Time", 4096, NULL, 6, NULL);
@@ -4610,10 +4645,10 @@ void setup()
     //   // DebugSerial.print("relayId: ");
     //   // DebugSerial.println(relayId);
 
-    xTaskCreate(&MqttBotTask, "MqttBotTask", 4096, NULL, 7, NULL); // MqttBotTask 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    xTaskCreate(MqttBotTask, "MqttBotTask", 4096, NULL, 7, NULL); // MqttBotTask 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
 
-    // xTaskCreate(&ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-    // xTaskCreate(&ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    // xTaskCreate(ModbusTask_Relay_8ch, "Task_8ch", 4096, NULL, 7, NULL); // 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    // xTaskCreate(ModbusTask_Relay_8ch_Schedule, "Task_8ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 8ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     // }
 
     // if (relayId == "relayId_16ch")
@@ -4621,8 +4656,8 @@ void setup()
     //   // DebugSerial.print("relayId: ");
     //   // DebugSerial.println(relayId);
 
-    //   xTaskCreate(&ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
-    //   // xTaskCreate(&ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    //   xTaskCreate(ModbusTask_Relay_16ch, "Task_16ch", 4096, NULL, 7, NULL); // 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
+    //   // xTaskCreate(ModbusTask_Relay_16ch_Schedule, "Task_16ch_Schedule", 4096, NULL, 7, NULL); // 스케줄 16ch Relay Task 생성 및 등록 (PPPOS:5, Modbus_Relay:7)
     // }
 
     // 온습도 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4641,7 +4676,7 @@ void setup()
       // DebugSerial.print("slaveId_th: ");
       // DebugSerial.println(slaveId_th);
 
-      xTaskCreate(&ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_th, "Task_th", 2048, NULL, 6, NULL);
     }
 
     // TM100 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4660,7 +4695,7 @@ void setup()
       // DebugSerial.print("slaveId_tm100: ");
       // DebugSerial.println(slaveId_tm100);
 
-      xTaskCreate(&ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_tm100, "Task_tm100", 2048, NULL, 6, NULL);
     }
 
     // 감우 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4680,7 +4715,7 @@ void setup()
       // DebugSerial.print("slaveId_rain: ");
       // DebugSerial.println(slaveId_rain);
 
-      xTaskCreate(&ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_rain, "Task_rain", 2048, NULL, 6, NULL);
     }
 
     // 지온·지습·EC 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4699,7 +4734,7 @@ void setup()
       // DebugSerial.print("slaveId_ec: ");
       // DebugSerial.println(slaveId_ec);
 
-      xTaskCreate(&ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
+      xTaskCreate(ModbusTask_Sensor_ec, "Task_ec", 2048, NULL, 6, NULL);
     }
 
     // 수분장력 센서 Task 생성 및 등록 (우선순위: 6)
@@ -4718,7 +4753,7 @@ void setup()
       // DebugSerial.print("slaveId_soil: ");
       // DebugSerial.println(slaveId_soil);
 
-      xTaskCreate(&SDI12Task_Sensor_soil, "Task_soil", 4096, NULL, 6, NULL);
+      xTaskCreate(SDI12Task_Sensor_soil, "Task_soil", 4096, NULL, 6, NULL);
     }
   }
 }
