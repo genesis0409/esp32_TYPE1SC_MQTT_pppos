@@ -328,7 +328,6 @@ struct ModbusData // callback 함수에서 task로 보낼 modbus 데이터
   uint16_t writingRegisters_Expand[3] = {(const uint16_t)0, 0, 0}; // 각 2바이트; {쓰기그룹, 마스크(선택), 제어idx} (16채널용)
   String payloadBuffer;
   String *rStr = nullptr;         // 파싱된 문자열 저장변수
-  String suffix;                  // 추가할 문자열을 설정
   uint8_t index_relay;            // r1~r16: 0~15
   uint8_t slaveId_current_module; // 현재 작동시킬 릴레이 모듈 ID 정보
 };
@@ -386,7 +385,7 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modb
   int mIndex = 0; // 모듈 인덱스 (릴레이 Modbus ID)
   int rIndex = 0; // 릴레이 인덱스
 
-  // 문자열이 유효한 숫자인지 입력값 검사
+  // 문자열이 유효한 숫자인지 입력값 검사 - 변환포맷: 02/01(String) -> 2/1(int)
   if (topic_module.length() == 2 && isDigit(topic_module[0]) && isDigit(topic_module[1]))
   {
     mIndex = topic_module.toInt();
@@ -410,9 +409,8 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modb
   if (rIndex >= 1 && rIndex <= 16) // 최대 16채널 릴레이
   {
     // modbusData 설정
-    modbusData.slaveId_current_module = mIndex;     // 모듈 인덱스: 릴레이 Modbus ID
-    modbusData.suffix = "/r" + String(topic_index); // "/r01" 등 릴레이 토픽 부분
-    modbusData.index_relay = rIndex - 1;            // 0부터 시작하는 인덱스
+    modbusData.slaveId_current_module = mIndex; // 모듈 인덱스: 릴레이 Modbus ID
+    modbusData.index_relay = rIndex - 1;        // 0부터 시작하는 인덱스
 
     // Debug Log
     // DebugSerial.print("writingRegisters[4]: ");
@@ -442,8 +440,6 @@ void process_FTV_Topic(String topic_module, String topic_index, ModbusData &modb
     // }
     // DebugSerial.println();
 
-    // DebugSerial.print("suffix: ");
-    // DebugSerial.println(modbusData.suffix);
     // DebugSerial.print("index_relay: ");
     // DebugSerial.println(modbusData.index_relay);
     // DebugSerial.print("slaveId_current_module: ");
@@ -773,7 +769,7 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             int offset = 0; // 현재 버퍼의 위치 관리
             int written;    // snprintf 반환값 저장
 
-            // 큐에 전달할 데이터 구성: {topic}${num&on}${ModbusResult}$$[{Time_ESP}]
+            // 큐에 전달할 데이터 구성: {topic}${module_num&relay_num&on/off&delay}${ModbusResult}$$[{Time_ESP}]
             // [0]: Topic
             // [1]: Payload
             // [2]: Modbus Result
@@ -791,28 +787,13 @@ void ModbusTask_Relay_8ch(void *pvParameters)
             }
             offset += written;
 
-            // suffix "/r00" 에서 substring으로 10의 자리, 1의 자리 추출
-            if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
-            {
-              // [1]-1 릴레이 번호 10의 자리 추가: {num
-              written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                                 "%s",
-                                 receivedData.suffix.substring(2, 3));
-              if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
-              {
-                DebugSerial.println("Error: Buffer overflow during Payload(num: 10 digits) creation!");
-                return; // 실패 처리
-              }
-              offset += written;
-            }
-
-            // [1]-2 릴레이 번호 1의 자리 및 on/off 정보 추가: {num&on}$
+            // [1] 모듈 번호 및 릴레이 번호, on/off 정보 추가: {module_num&relay_num&on/off&delay}
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                               "%s&%s$",
-                               receivedData.suffix.substring(3), receivedData.rStr[0]);
+                               "%d&%d&%s&%s",
+                               receivedData.slaveId_current_module, receivedData.index_relay, receivedData.rStr[0], receivedData.rStr[1]);
             if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
             {
-              DebugSerial.println("Error: Buffer overflow during Payload(num: 1 digits) creation!");
+              DebugSerial.println("Error: Buffer overflow during Payload(module_num&relay_num&on/off&delay) creation!");
               return; // 실패 처리
             }
             offset += written;
@@ -1111,8 +1092,8 @@ void ModbusTask_Relay_16ch(void *pvParameters)
 
         /* Serial1 Initialization */
         // SerialPort.begin(9600, SERIAL_8N1, rxPin, txPin); // RXD1 : 33, TXD1 : 32
-        // Modbus slave ID 1
-        modbus.begin(slaveId_relay, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
+        // Modbus slave ID: callback 에서 ID 결정
+        modbus.begin(receivedData.slaveId_current_module, SerialPort); // 각 Task는 자신의 Modbus Slave ID로 SerialPort를 초기화
 
         // 이하 Modbus 작업 수행
         uint16_t localWritingRegisters[4];
@@ -1421,7 +1402,7 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             int offset = 0; // 현재 버퍼의 위치 관리
             int written;    // snprintf 반환값 저장
 
-            // 큐에 전달할 데이터 구성: {topic}${num&on}${ModbusResult}$$[{Time_ESP}]
+            // 큐에 전달할 데이터 구성: {topic}${module_num&relay_num&on/off&delay}${ModbusResult}$$[{Time_ESP}]
             // [0]: Topic
             // [1]: Payload
             // [2]: Modbus Result
@@ -1439,28 +1420,13 @@ void ModbusTask_Relay_16ch(void *pvParameters)
             }
             offset += written;
 
-            // suffix "/r00" 에서 substring으로 10의 자리, 1의 자리 추출
-            if (bool((receivedData.suffix.substring(2, 3)).toInt())) // 십의 자리가 있다면
-            {
-              // [1]-1 릴레이 번호 10의 자리 추가: {num
-              written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                                 "%s",
-                                 receivedData.suffix.substring(2, 3));
-              if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
-              {
-                DebugSerial.println("Error: Buffer overflow during Payload(num: 10 digits) creation!");
-                return; // 실패 처리
-              }
-              offset += written;
-            }
-
-            // [1]-2 릴레이 번호 1의 자리 및 on/off 정보 추가: {num&on}$
+            // [1] 모듈 번호 및 릴레이 번호, on/off 정보 추가: {module_num&relay_num&on/off&delay}
             written = snprintf(pubMsg + offset, PUBLISH_MSG_SIZE_MIN - offset,
-                               "%s&%s$",
-                               receivedData.suffix.substring(3), receivedData.rStr[0]);
+                               "%d&%d&%s&%s",
+                               receivedData.slaveId_current_module, receivedData.index_relay, receivedData.rStr[0], receivedData.rStr[1]);
             if (written < 0 || written >= (PUBLISH_MSG_SIZE_MIN - offset))
             {
-              DebugSerial.println("Error: Buffer overflow during Payload(num: 1 digits) creation!");
+              DebugSerial.println("Error: Buffer overflow during Payload(module_num&relay_num&on/off&delay) creation!");
               return; // 실패 처리
             }
             offset += written;
