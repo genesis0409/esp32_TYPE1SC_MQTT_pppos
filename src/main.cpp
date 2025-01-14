@@ -2851,6 +2851,10 @@ bool startPPPOS()
 // mqtt 클라이언트의 연결이 끊어졌을 때 재연결
 void reconnect()
 {
+  // 최대 재시도 횟수 설정
+  static int retryCount = 0;
+  const int MAX_RETRY = 60; // 5분 초과 시 재부팅
+
   // Loop until we're reconnected
   while (!client.connected()) // mqtt연결 확인
   {
@@ -2869,8 +2873,51 @@ void reconnect()
     }
     else // 실패 시 재연결 시도
     {
+      retryCount++;
+      int state = client.state();
+
       DebugSerial.print("failed, rc=");
-      DebugSerial.print(client.state());
+      DebugSerial.print(state);
+
+      // 연결 실패 원인 출력
+      switch (state)
+      {
+      case -4:
+        DebugSerial.println(" (MQTT_CONNECTION_TIMEOUT)");
+        break;
+      case -3:
+        DebugSerial.println(" (MQTT_CONNECTION_LOST)");
+        break;
+      case -2:
+        DebugSerial.println(" (MQTT_CONNECT_FAILED)");
+        break;
+      case -1:
+        DebugSerial.println(" (MQTT_DISCONNECTED)");
+        break;
+      case 1:
+        DebugSerial.println(" (MQTT_CONNECT_BAD_PROTOCOL)");
+        break;
+      case 2:
+        DebugSerial.println(" (MQTT_CONNECT_BAD_CLIENT_ID)");
+        break;
+      case 3:
+        DebugSerial.println(" (MQTT_CONNECT_UNAVAILABLE)");
+        break;
+      case 4:
+        DebugSerial.println(" (MQTT_CONNECT_BAD_CREDENTIALS)");
+        break;
+      case 5:
+        DebugSerial.println(" (MQTT_CONNECT_UNAUTHORIZED)");
+        break;
+      }
+
+      // 최대 재시도 횟수 초과시 재부팅
+      if (retryCount >= MAX_RETRY)
+      {
+        DebugSerial.println("Max retry count reached. Restarting...");
+        ESP.restart();
+      }
+
       DebugSerial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
@@ -3485,11 +3532,16 @@ void setup()
     extAntenna();
 
     /* TYPE1SC Module Initialization */
-    if (TYPE1SC.init())
+    int TYPE1SC_status = TYPE1SC.init();
+    if (TYPE1SC_status)
     {
       DebugSerial.println("TYPE1SC Module Error!!!");
+      if (TYPE1SC_status == 1) // 1인 경우 TYPE1SC.init() 모뎀 초기화 실패
+      {
+        DebugSerial.println("TYPE1SC.init() Failed: ESP RESTART!!!");
+        ESP.restart();
+      }
     }
-
     /* Network Disable */
     if (TYPE1SC.setCFUN(0) == 0)
     {
@@ -3508,9 +3560,15 @@ void setup()
     delay(2000);
 
     /* TYPE1SC Module Initialization */
-    if (TYPE1SC.init())
+    TYPE1SC_status = TYPE1SC.init();
+    if (TYPE1SC_status)
     {
       DebugSerial.println("TYPE1SC Module Error!!!");
+      if (TYPE1SC_status == 1) // 1인 경우 TYPE1SC.init() 모뎀 초기화 실패
+      {
+        DebugSerial.println("TYPE1SC.init() Failed: ESP RESTART!!!");
+        ESP.restart();
+      }
     }
 
     DebugSerial.println("TYPE1SC Module Ready!!!");
@@ -3731,9 +3789,15 @@ void setup()
     extAntenna();
 
     /* TYPE1SC Module Initialization */
-    if (TYPE1SC.init())
+    int TYPE1SC_status = TYPE1SC.init();
+    if (TYPE1SC_status)
     {
       DebugSerial.println("TYPE1SC Module Error!!!");
+      if (TYPE1SC_status == 1) // 1인 경우 TYPE1SC.init() 모뎀 초기화 실패
+      {
+        DebugSerial.println("TYPE1SC.init() Failed: ESP RESTART!!!");
+        ESP.restart();
+      }
     }
 
     /* Network Registration Check */
