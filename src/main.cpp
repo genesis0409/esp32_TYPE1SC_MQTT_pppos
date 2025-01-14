@@ -235,8 +235,9 @@ const String AddSch_TOPIC = "/ResAddSch";       // /ResAddSch
 const String UpdateSch_TOPIC = "/ResUpdateSch"; // /ResUpdateSch
 const String DelSch_TOPIC = "/ResDelSch";       // /ResDelSch
 
-const String WILL_TOPIC = "/disconnect";     // /disconnect
-const String WILL_MESSAGE = "DISCONNECTED."; // /DISCONNECTED.
+const String WILL_TOPIC = "/connect"; // /connect
+const String WILL_MESSAGE = "0";      // 0: disConnected
+const String ALIVE_MESSAGE = "1";     // 1: Connected
 
 #define MULTI_LEVEL_WILDCARD "/#"
 #define SINGLE_LEVEL_WILDCARD "/+"
@@ -2809,16 +2810,14 @@ void reconnect()
   {
     DebugSerial.print("Attempting MQTT connection...");
     // Attempt to connect
-    // if (client.connect(mqttUsername.c_str())) // ID 바꿔서 mqtt 서버 연결시도 // connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage)
-    if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + " " + WILL_MESSAGE).c_str()))
+    if (client.connect(mqttUsername.c_str(), mqttUsername.c_str(), mqttPw.c_str(), (PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), QOS, 0, (mqttUsername + "&" + WILL_MESSAGE).c_str()))
     {
       DebugSerial.println("MQTT connected");
 
       client.subscribe((SUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + CONTROL_TOPIC + MULTI_LEVEL_WILDCARD).c_str(), QOS);
 
       // Once connected, publish an announcement...
-      client.publish((PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + UPDATE_TOPIC).c_str(), ("FTV " + mqttUsername + " Ready.").c_str()); // 준비되었음을 알림(publish)
-                                                                                                                                  // ... and resubscribe
+      client.publish((PUB_TOPIC + FTV_TOPIC + DEVICE_TOPIC + WILL_TOPIC).c_str(), ("FTV&" + mqttUsername + "&" + ALIVE_MESSAGE).c_str()); // 준비되었음을 알림(publish)
     }
     else // 실패 시 재연결 시도
     {
